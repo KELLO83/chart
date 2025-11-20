@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Dict, List
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -9,11 +9,6 @@ import uvicorn
 
 from indicator.rsi import RSI_COLOR, compute_rsi
 from indicator.obv import compute_obv
-from indicator.cloud import (
-    CLOUD_BEARISH_COLOR,
-    CLOUD_BULLISH_COLOR,
-    compute_ichimoku_cloud,
-)
 
 
 CSV_PATH = Path(__file__).with_name("ETHUSDT_2Y_OHLCV_Trans.csv")
@@ -91,20 +86,17 @@ def _build_payload(normalized_interval: str) -> Dict[str, List[Dict]]:
     return format_chart_payload(working)
 
 
-def format_chart_payload(data: pd.DataFrame) -> Dict[str, Any]:
+def format_chart_payload(data: pd.DataFrame) -> Dict[str, List[Dict]]:
     candles: List[Dict] = []
     volumes: List[Dict] = []
     rsi_points: List[Dict] = []
     obv_points: List[Dict] = []
-    cloud_span_a: List[Dict] = []
-    cloud_span_b: List[Dict] = []
     rsi_series = compute_rsi(data["close"])
     obv_series = (
         compute_obv(data["close"], data["volume"])
         .reindex(data.index, method="ffill")
         .fillna(0.0)
     )
-    cloud = compute_ichimoku_cloud(data["high"], data["low"])
 
     for timestamp, row in data.iterrows():
         time_payload = {
@@ -135,29 +127,11 @@ def format_chart_payload(data: pd.DataFrame) -> Dict[str, Any]:
         obv_points.append(
             {"time": time_payload, "value": float(obv_series.loc[timestamp])}
         )
-        if timestamp in cloud.span_a.index:
-            cloud_span_a.append(
-                {
-                    "time": time_payload,
-                    "value": float(cloud.span_a.loc[timestamp]),
-                }
-            )
-        if timestamp in cloud.span_b.index:
-            cloud_span_b.append(
-                {
-                    "time": time_payload,
-                    "value": float(cloud.span_b.loc[timestamp]),
-                }
-            )
     return {
         "candles": candles,
         "volumes": volumes,
         "rsi": rsi_points,
         "obv": obv_points,
-        "cloud": {
-            "spanA": cloud_span_a,
-            "spanB": cloud_span_b,
-        },
     }
 
 
@@ -165,7 +139,7 @@ app = FastAPI(title="ETH/USDT Candlestick Chart")
 
 
 @app.get("/api/candles")
-def read_candles(interval: str = "1d") -> Dict[str, Any]:
+def read_candles(interval: str = "1d") -> Dict[str, List[Dict]]:
     try:
         normalized = normalize_interval(interval)
     except ValueError as exc:
@@ -312,8 +286,6 @@ def index() -> str:
         const priceContainer = document.getElementById("price-chart");
         const rsiContainer = document.getElementById("rsi-chart");
         const obvContainer = document.getElementById("obv-chart");
-        const CLOUD_BULL_COLOR = "%(cloud_bull)s";
-        const CLOUD_BEAR_COLOR = "%(cloud_bear)s";
         const intervalButtons = document.querySelectorAll(".interval-button");
         let currentInterval = "1d";
         let requestCounter = 0;
@@ -464,19 +436,34 @@ def index() -> str:
             },
         });
 
-        const spanASeries = priceChart.addLineSeries({
-            color: CLOUD_BULL_COLOR,
-            lineWidth: 2,
-            priceLineVisible: false,
-            lastValueVisible: false,
-            crosshairMarkerVisible: false,
+        const candleSeries = priceChart.addCandlestickSeries({
+            upColor: "%(up)s",
+            downColor: "%(down)s",
+            wickUpColor: "%(up)s",
+            wickDownColor: "%(down)s",
+            borderUpColor: "%(up)s",
+            borderDownColor: "%(down)s",
         });
-        const spanBSeries = priceChart.addLineSeries({
-            color: CLOUD_BEAR_COLOR,
-            lineWidth: 2,
+
+        const volumeSeries = priceChart.addHistogramSeries({
+            priceScaleId: "left",
+            base: 0,
+            priceFormat: {
+                type: "volume",
+            },
             priceLineVisible: false,
-            lastValueVisible: false,
-            crosshairMarkerVisible: false,
+            color: "rgba(60, 120, 216, 0.5)",
+            scaleMargins: {
+                top: 0.85,
+                bottom: 0,
+            },
+        });
+        priceChart.priceScale("left").applyOptions({
+            visible: false,
+            scaleMargins: {
+                top: 0.85,
+                bottom: 0,
+            },
         });
 
         const rsiSeries = rsiChart.addLineSeries({
@@ -562,8 +549,8 @@ def index() -> str:
                 }
                 const data = await response.json();
                 if (token !== requestCounter) return;
-                spanASeries.setData(data.cloud?.spanA ?? []);
-                spanBSeries.setData(data.cloud?.spanB ?? []);
+                candleSeries.setData(data.candles);
+                volumeSeries.setData(data.volumes);
                 rsiSeries.setData(data.rsi);
                 obvSeries.setData(data.obv);
                 priceChart.timeScale().fitContent();
@@ -616,8 +603,6 @@ def index() -> str:
         .replace("%(down)s", DOWN_COLOR)
         .replace("%(rsi)s", RSI_COLOR)
         .replace("%(obv)s", OBV_COLOR)
-        .replace("%(cloud_bull)s", CLOUD_BULLISH_COLOR)
-        .replace("%(cloud_bear)s", CLOUD_BEARISH_COLOR)
     )
 
 
