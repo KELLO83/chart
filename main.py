@@ -234,14 +234,14 @@ def index() -> str:
         body {
             margin: 0;
             font-family: "Pretendard", "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-            background-color: #050913;
+            background-color: #000000;
             color: #c7cfde;
         }
         header {
             padding: 0.95rem 1.75rem;
             border-bottom: 1px solid #1c2032;
-            background: linear-gradient(180deg, #0b1224, #050913);
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+            background: linear-gradient(180deg, #050505, #000000);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -299,6 +299,22 @@ def index() -> str:
             border-color: #2d8cff;
             box-shadow: 0 0 0 2px rgba(45, 140, 255, 0.2);
         }
+        .pill-button {
+            border: none;
+            background: linear-gradient(135deg, #162136, #10182b);
+            color: #8f9bb8;
+            font-size: 0.85rem;
+            font-weight: 500;
+            padding: 0.35rem 1rem;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+        }
+        .pill-button.active {
+            color: #ffffff;
+            box-shadow: inset 0 0 12px rgba(25, 168, 255, 0.35);
+            background: linear-gradient(135deg, #1f2d4a, #1a2440);
+        }
         .interval-toggle {
             display: inline-flex;
             background: #0b1223;
@@ -344,10 +360,10 @@ def index() -> str:
         .chart-panel {
             flex: 1;
             min-height: 120px;
-            background: #030710;
-            border: 1px solid #1c2234;
+            background: #000000;
+            border: 1px solid #161a28;
             border-radius: 10px;
-            box-shadow: inset 0 0 25px rgba(0, 0, 0, 0.45);
+            box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.6);
         }
         .chart-panel.price {
             flex: 4.8;
@@ -373,6 +389,7 @@ def index() -> str:
                 <label for="dataset-select">DATASET</label>
                 <select id="dataset-select" aria-label="데이터셋 선택"></select>
             </div>
+            <button type="button" id="volume-toggle" class="pill-button active">거래량 표시</button>
             <div class="interval-toggle" role="group" aria-label="차트 주기 선택">
                 <button type="button" class="interval-button active" data-interval="1d">1일</button>
                 <button type="button" class="interval-button" data-interval="3d">3일</button>
@@ -393,11 +410,16 @@ def index() -> str:
         const obvContainer = document.getElementById("obv-chart");
         const datasetSelect = document.getElementById("dataset-select");
         const datasetMeta = document.getElementById("dataset-meta");
-        const intervalButtons = document.querySelectorAll(".interval-button");
+        const intervalButtons = document.querySelectorAll(
+            ".interval-toggle .interval-button"
+        );
+        const volumeToggle = document.getElementById("volume-toggle");
         let currentInterval = "1d";
         let currentDataset = null;
         let requestCounter = 0;
         let datasetList = [];
+        let latestVolumeData = [];
+        let isVolumeVisible = true;
 
         const businessDayToDate = (time) => {
             if (typeof time === "string") {
@@ -445,7 +467,7 @@ def index() -> str:
 
         const baseOptions = {
             layout: {
-                background: { color: "#03060f" },
+                background: { color: "#000000" },
                 textColor: "#a5afce",
                 fontSize: 12,
                 fontFamily: "Inter, Pretendard, sans-serif",
@@ -623,6 +645,24 @@ def index() -> str:
             datasetMeta.textContent = `${info.label} · ${info.range} · ${info.rows}건`;
         };
 
+        const updateVolumeButton = () => {
+            if (!volumeToggle) return;
+            volumeToggle.classList.toggle("active", isVolumeVisible);
+            volumeToggle.textContent = isVolumeVisible
+                ? "거래량 표시"
+                : "거래량 숨김";
+        };
+
+        const syncVolumeSeries = () => {
+            if (!volumeSeries) return;
+            if (isVolumeVisible) {
+                volumeSeries.setData(latestVolumeData);
+            } else {
+                volumeSeries.setData([]);
+            }
+            volumeSeries.applyOptions({ visible: isVolumeVisible });
+        };
+
         const syncRanges = (sourceChart, range) => {
             if (!range || syncing) return;
             syncing = true;
@@ -671,7 +711,8 @@ def index() -> str:
                 const data = await response.json();
                 if (token !== requestCounter) return;
                 candleSeries.setData(data.candles);
-                volumeSeries.setData(data.volumes);
+                latestVolumeData = data.volumes;
+                syncVolumeSeries();
                 rsiSeries.setData(data.rsi);
                 obvSeries.setData(data.obv);
                 priceChart.timeScale().fitContent();
@@ -741,7 +782,16 @@ def index() -> str:
             loadInterval(currentInterval, currentDataset);
         });
 
+        if (volumeToggle) {
+            volumeToggle.addEventListener("click", () => {
+                isVolumeVisible = !isVolumeVisible;
+                updateVolumeButton();
+                syncVolumeSeries();
+            });
+        }
+
         setActiveIntervalButton(currentInterval);
+        updateVolumeButton();
         bootstrapDatasets();
 
         const containerChartMap = new Map([
