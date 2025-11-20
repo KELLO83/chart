@@ -1,6 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -11,7 +11,8 @@ from indicator.rsi import RSI_COLOR, compute_rsi
 from indicator.obv import compute_obv
 
 
-CSV_PATH = Path(__file__).with_name("ETHUSDT_2Y_OHLCV_Trans.csv")
+DATA_DIR = Path(__file__).with_name("stock_data")
+DEFAULT_DATASET_ID = "ETHUSDT_2Y_OHLCV_Trans"
 UP_COLOR = "#089981"
 DOWN_COLOR = "#f23645"
 UP_VOLUME_COLOR = "rgba(8, 153, 129, 0.4)"
@@ -38,9 +39,41 @@ def load_price_data(csv_path: Path) -> pd.DataFrame:
     return data.dropna(subset=numeric_cols)
 
 
-@lru_cache
-def get_price_data() -> pd.DataFrame:
-    data = load_price_data(CSV_PATH)
+def get_dataset_catalog() -> Dict[str, Path]:
+    if not DATA_DIR.exists():
+        raise ValueError("stock_data 폴더를 찾을 수 없습니다.")
+    csv_files = sorted(p for p in DATA_DIR.iterdir() if p.suffix.lower() == ".csv")
+    if not csv_files:
+        raise ValueError("stock_data 폴더에 CSV 데이터셋이 없습니다.")
+    return {csv.stem: csv for csv in csv_files}
+
+
+def get_default_dataset_id() -> str:
+    catalog = get_dataset_catalog()
+    if DEFAULT_DATASET_ID in catalog:
+        return DEFAULT_DATASET_ID
+    return next(iter(catalog.keys()))
+
+
+def normalize_dataset_id(dataset_id: Optional[str]) -> str:
+    catalog = get_dataset_catalog()
+    target = dataset_id.strip() if dataset_id else ""
+    if not target:
+        return get_default_dataset_id()
+    if target not in catalog:
+        raise ValueError(
+            f"지원하지 않는 데이터셋입니다. 사용 가능: {', '.join(sorted(catalog))}"
+        )
+    return target
+
+
+@lru_cache(maxsize=None)
+def get_price_data(dataset_id: str) -> pd.DataFrame:
+    catalog = get_dataset_catalog()
+    csv_path = catalog.get(dataset_id)
+    if not csv_path:
+        raise ValueError("선택한 데이터셋을 찾을 수 없습니다.")
+    data = load_price_data(csv_path)
     if data.empty:
         raise ValueError("유효한 차트 데이터가 없습니다.")
     return data
@@ -80,10 +113,22 @@ def resample_price_data(data: pd.DataFrame, interval: str) -> pd.DataFrame:
 
 
 @lru_cache(maxsize=None)
-def _build_payload(normalized_interval: str) -> Dict[str, List[Dict]]:
-    base_data = get_price_data()
+def _build_payload(dataset_id: str, normalized_interval: str) -> Dict[str, List[Dict]]:
+    base_data = get_price_data(dataset_id)
     working = resample_price_data(base_data, normalized_interval)
     return format_chart_payload(working)
+
+
+def get_dataset_summary(dataset_id: str) -> Dict[str, Any]:
+    data = get_price_data(dataset_id)
+    start = data.index.min()
+    end = data.index.max()
+    return {
+        "id": dataset_id,
+        "label": dataset_id.replace("_", " "),
+        "rows": len(data),
+        "range": f"{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}",
+    }
 
 
 def format_chart_payload(data: pd.DataFrame) -> Dict[str, List[Dict]]:
@@ -139,16 +184,36 @@ app = FastAPI(title="ETH/USDT Candlestick Chart")
 
 
 @app.get("/api/candles")
-def read_candles(interval: str = "1d") -> Dict[str, List[Dict]]:
+def read_candles(
+    interval: str = "1d",
+    dataset: Optional[str] = None,
+) -> Dict[str, List[Dict]]:
     try:
-        normalized = normalize_interval(interval)
+        normalized_interval = normalize_interval(interval)
+        dataset_id = normalize_dataset_id(dataset)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
-        return _build_payload(normalized)
+        return _build_payload(dataset_id, normalized_interval)
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/datasets")
+def list_datasets() -> List[Dict[str, Any]]:
+    try:
+        catalog = get_dataset_catalog()
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    default_id = get_default_dataset_id()
+    payload: List[Dict[str, Any]] = []
+    for dataset_id in sorted(catalog.keys()):
+        summary = get_dataset_summary(dataset_id)
+        summary["default"] = dataset_id == default_id
+        payload.append(summary)
+    return payload
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -199,6 +264,40 @@ def index() -> str:
             margin: 0;
             font-size: 0.8rem;
             color: #7f8db4;
+        }
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .dataset-picker {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            min-width: 230px;
+        }
+        .dataset-picker label {
+            font-size: 0.7rem;
+            color: #7f8db4;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+        select#dataset-select {
+            appearance: none;
+            padding: 0.45rem 0.85rem;
+            border-radius: 999px;
+            border: 1px solid rgba(38, 52, 84, 0.8);
+            background: #0b1223;
+            color: #dbe5ff;
+            font-weight: 500;
+            min-width: 220px;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.3);
+        }
+        select#dataset-select:focus {
+            outline: none;
+            border-color: #2d8cff;
+            box-shadow: 0 0 0 2px rgba(45, 140, 255, 0.2);
         }
         .interval-toggle {
             display: inline-flex;
@@ -266,13 +365,19 @@ def index() -> str:
 <body>
     <header>
         <div class="header-title">
-            <h1>ETH/USDT · 캔들 차트</h1>
-            <p>트레이딩뷰 스타일 · 다중 주기</p>
+            <h1>멀티 데이터셋 · 캔들 차트</h1>
+            <p id="dataset-meta">데이터셋 정보를 불러오는 중...</p>
         </div>
-        <div class="interval-toggle" role="group" aria-label="차트 주기 선택">
-            <button type="button" class="interval-button active" data-interval="1d">1일</button>
-            <button type="button" class="interval-button" data-interval="3d">3일</button>
-            <button type="button" class="interval-button" data-interval="1w">1주</button>
+        <div class="header-controls">
+            <div class="dataset-picker">
+                <label for="dataset-select">DATASET</label>
+                <select id="dataset-select" aria-label="데이터셋 선택"></select>
+            </div>
+            <div class="interval-toggle" role="group" aria-label="차트 주기 선택">
+                <button type="button" class="interval-button active" data-interval="1d">1일</button>
+                <button type="button" class="interval-button" data-interval="3d">3일</button>
+                <button type="button" class="interval-button" data-interval="1w">1주</button>
+            </div>
         </div>
     </header>
     <main>
@@ -286,9 +391,13 @@ def index() -> str:
         const priceContainer = document.getElementById("price-chart");
         const rsiContainer = document.getElementById("rsi-chart");
         const obvContainer = document.getElementById("obv-chart");
+        const datasetSelect = document.getElementById("dataset-select");
+        const datasetMeta = document.getElementById("dataset-meta");
         const intervalButtons = document.querySelectorAll(".interval-button");
         let currentInterval = "1d";
+        let currentDataset = null;
         let requestCounter = 0;
+        let datasetList = [];
 
         const businessDayToDate = (time) => {
             if (typeof time === "string") {
@@ -506,6 +615,14 @@ def index() -> str:
         const charts = [priceChart, obvChart, rsiChart];
         let syncing = false;
 
+        const setDatasetMeta = (info) => {
+            if (!info) {
+                datasetMeta.textContent = "데이터셋 정보를 불러올 수 없습니다.";
+                return;
+            }
+            datasetMeta.textContent = `${info.label} · ${info.range} · ${info.rows}건`;
+        };
+
         const syncRanges = (sourceChart, range) => {
             if (!range || syncing) return;
             syncing = true;
@@ -532,11 +649,15 @@ def index() -> str:
             });
         };
 
-        const loadInterval = async (interval) => {
+        const loadInterval = async (interval, dataset = currentDataset) => {
+            if (!dataset) return;
             const token = ++requestCounter;
             setActiveIntervalButton(interval);
             try {
-                const response = await fetch(`/api/candles?interval=${interval}`);
+                const url = new URL("/api/candles", window.location.origin);
+                url.searchParams.set("interval", interval);
+                url.searchParams.set("dataset", dataset);
+                const response = await fetch(url);
                 if (!response.ok) {
                     let message = "차트 데이터를 불러오지 못했습니다.";
                     try {
@@ -557,6 +678,7 @@ def index() -> str:
                 const syncedRange = priceChart.timeScale().getVisibleLogicalRange();
                 syncRanges(priceChart, syncedRange);
                 currentInterval = interval;
+                currentDataset = dataset;
             } catch (error) {
                 if (token === requestCounter) {
                     setActiveIntervalButton(currentInterval);
@@ -570,12 +692,57 @@ def index() -> str:
             button.addEventListener("click", () => {
                 const interval = button.dataset.interval;
                 if (!interval || interval === currentInterval) return;
-                loadInterval(interval);
+                loadInterval(interval, currentDataset);
             });
         });
 
+        const populateDatasetSelect = (items) => {
+            datasetSelect.innerHTML = "";
+            items.forEach((item) => {
+                const option = document.createElement("option");
+                option.value = item.id;
+                option.textContent = `${item.label} · ${item.range}`;
+                datasetSelect.appendChild(option);
+            });
+            datasetSelect.disabled = items.length === 0;
+        };
+
+        const bootstrapDatasets = async () => {
+            try {
+                const response = await fetch("/api/datasets");
+                if (!response.ok) {
+                    throw new Error("데이터셋 목록을 불러오지 못했습니다.");
+                }
+                const data = await response.json();
+                datasetList = data;
+                populateDatasetSelect(data);
+                const fallback = data.find((item) => item.default) ?? data[0];
+                if (!fallback) {
+                    setDatasetMeta(null);
+                    return;
+                }
+                currentDataset = fallback.id;
+                datasetSelect.value = currentDataset;
+                setDatasetMeta(fallback);
+                await loadInterval(currentInterval, currentDataset);
+            } catch (error) {
+                console.error(error);
+                alert(error.message || "데이터셋 목록을 불러오지 못했습니다.");
+                setDatasetMeta(null);
+            }
+        };
+
+        datasetSelect.addEventListener("change", () => {
+            const selected = datasetSelect.value;
+            if (!selected || selected === currentDataset) return;
+            currentDataset = selected;
+            const meta = datasetList.find((item) => item.id === selected);
+            setDatasetMeta(meta ?? null);
+            loadInterval(currentInterval, currentDataset);
+        });
+
         setActiveIntervalButton(currentInterval);
-        loadInterval(currentInterval);
+        bootstrapDatasets();
 
         const containerChartMap = new Map([
             [priceContainer, priceChart],
