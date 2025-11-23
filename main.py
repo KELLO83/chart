@@ -118,9 +118,22 @@ def _extract_cvd_columns(df: pd.DataFrame) -> Optional[Dict[str, str]]:
     return None
 
 
-def _normalize_time_payload(date_value: pd.Timestamp, is_crypto: bool = False) -> int:
-    # Always return Unix timestamp in seconds for consistent zooming physics
-    return int(date_value.timestamp())
+def _normalize_time_payload(
+    date_value: pd.Timestamp, is_crypto: bool = False
+) -> Union[int, Dict[str, int]]:
+    """Normalize timestamps for chart payloads.
+
+    Crypto는 24/7 데이터라 연속 unix 초를 그대로 사용하지만,
+    주식(영업일만 포함)의 경우 거래일 기준 좌표를 줘야 확대 시 캔들이 밀리지 않는다.
+    """
+    if is_crypto:
+        return int(date_value.timestamp())
+    date_only = date_value.to_pydatetime()
+    return {
+        "year": date_only.year,
+        "month": date_only.month,
+        "day": date_only.day,
+    }
 
 
 def _resolve_investor_role(label: Any) -> Optional[str]:
