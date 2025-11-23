@@ -564,6 +564,7 @@ def index() -> str:
         let requestCounter = 0;
         let datasetList = [];
         let latestVolumeData = [];
+        let latestCandles = [];
         let isVolumeVisible = true;
         let candleMap = new Map();
         let volumeMap = new Map();
@@ -1011,6 +1012,9 @@ def index() -> str:
             return Number(value).toLocaleString("en-US");
         };
 
+        const sleep = (ms = 0) =>
+            new Promise((resolve) => setTimeout(resolve, ms));
+
         const updateStatusBar = (timeKey) => {
             const key = timeKey || latestTimeKey;
             const candle = key ? candleMap.get(key) : null;
@@ -1110,6 +1114,7 @@ def index() -> str:
                     );
                 }
                 latestVolumeData = data.volumes;
+                latestCandles = data.candles;
                 candleMap = buildDataMap(data.candles);
                 volumeMap = buildDataMap(data.volumes);
                 rsiMap = buildDataMap(data.rsi);
@@ -1131,6 +1136,116 @@ def index() -> str:
                 }
                 console.error(error);
                 alert(error.message || "차트 데이터를 불러오지 못했습니다.");
+            }
+        };
+
+        const focusRecentCandles = async (count) => {
+            if (
+                !count ||
+                !priceChart ||
+                !priceChart.timeScale ||
+                !latestCandles.length
+            ) {
+                return null;
+            }
+            const startIndex = Math.max(0, latestCandles.length - count);
+            const from = latestCandles[startIndex]?.time;
+            const to = latestCandles[latestCandles.length - 1]?.time;
+            if (from === undefined || to === undefined) {
+                return null;
+            }
+            const previousRange = priceChart.timeScale().getVisibleRange();
+            priceChart.timeScale().setVisibleRange({ from, to });
+            await sleep(120);
+            return () => {
+                if (previousRange) {
+                    priceChart.timeScale().setVisibleRange(previousRange);
+                }
+            };
+        };
+
+        const copyChartScreenshotToClipboard = async (options = {}) => {
+            const captureChartCanvas = (chartInstance) => {
+                if (
+                    chartInstance &&
+                    typeof chartInstance.takeScreenshot === "function"
+                ) {
+                    return chartInstance.takeScreenshot();
+                }
+                return null;
+            };
+
+            const gatherScreenshots = () => {
+                const shots = [];
+                [priceChart, obvChart, rsiChart, timeAxisChart].forEach(
+                    (chart) => {
+                        const canvas = captureChartCanvas(chart);
+                        if (canvas) shots.push(canvas);
+                    }
+                );
+                return shots;
+            };
+
+            const composeStackedCanvas = (segments) => {
+                if (!segments.length) return null;
+                const width = Math.max(...segments.map((c) => c.width));
+                const height = segments.reduce((sum, c) => sum + c.height, 0);
+                const merged = document.createElement("canvas");
+                merged.width = width;
+                merged.height = height;
+                const ctx = merged.getContext("2d");
+                let offsetY = 0;
+                segments.forEach((segment) => {
+                    const offsetX = (width - segment.width) / 2;
+                    ctx.drawImage(segment, offsetX, offsetY);
+                    offsetY += segment.height;
+                });
+                return merged;
+            };
+
+            const segments = gatherScreenshots();
+            if (!segments.length) {
+                alert("차트를 아직 불러오고 있습니다. 잠시 후 다시 시도해 주세요.");
+                return;
+            }
+
+            let restoreRange = null;
+            try {
+                if (options?.recentCandles) {
+                    restoreRange = await focusRecentCandles(
+                        options.recentCandles
+                    );
+                }
+                const canvas = composeStackedCanvas(segments);
+                if (!canvas) throw new Error("스크린샷 생성에 실패했습니다.");
+                const blob = await new Promise((resolve, reject) => {
+                    canvas.toBlob((result) => {
+                        if (result) resolve(result);
+                        else reject(new Error("이미지 변환에 실패했습니다."));
+                    }, "image/png");
+                });
+                if (navigator.clipboard?.write && window.ClipboardItem) {
+                    const item = new ClipboardItem({ "image/png": blob });
+                    await navigator.clipboard.write([item]);
+                    console.info("차트 이미지를 클립보드에 복사했습니다.");
+                } else {
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement("a");
+                    link.href = url;
+                    link.download = `chart-${Date.now()}.png`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    URL.revokeObjectURL(url);
+                }
+            } catch (error) {
+                console.error(error);
+                alert("차트 이미지를 복사하지 못했습니다.");
+            } finally {
+                if (restoreRange) {
+                    await sleep(60);
+                    restoreRange();
+                }
             }
         };
 
@@ -1197,7 +1312,7 @@ def index() -> str:
 
         setActiveIntervalButton(currentInterval);
         updateVolumeButton();
-        
+
         const resizeObserver = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 const chart = containerChartMap.get(entry.target);
@@ -1209,6 +1324,25 @@ def index() -> str:
         resizeObserverInstance = resizeObserver;
 
         bootstrapDatasets();
+
+        document.addEventListener("keydown", (event) => {
+            if (
+                (event.key === "S" || event.key === "s") &&
+                event.ctrlKey &&
+                event.shiftKey
+            ) {
+                event.preventDefault();
+                copyChartScreenshotToClipboard();
+            }
+            if (
+                (event.key === "X" || event.key === "x") &&
+                event.ctrlKey &&
+                event.shiftKey
+            ) {
+                event.preventDefault();
+                copyChartScreenshotToClipboard({ recentCandles: 120 });
+            }
+        });
     </script>
 </body>
 </html>
