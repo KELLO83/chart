@@ -118,12 +118,9 @@ def _extract_cvd_columns(df: pd.DataFrame) -> Optional[Dict[str, str]]:
     return None
 
 
-def _normalize_time_payload(date_value: pd.Timestamp) -> Dict[str, int]:
-    return {
-        "year": int(date_value.year),
-        "month": int(date_value.month),
-        "day": int(date_value.day),
-    }
+def _normalize_time_payload(date_value: pd.Timestamp, is_crypto: bool = False) -> int:
+    # Always return Unix timestamp in seconds for consistent zooming physics
+    return int(date_value.timestamp())
 
 
 def _resolve_investor_role(label: Any) -> Optional[str]:
@@ -170,6 +167,13 @@ def _series_payload_from_dataframe(source: pd.DataFrame) -> Optional[Dict[str, L
     if not any(payload.values()):
         return None
     return payload
+
+
+def is_crypto_dataset(dataset_id: str) -> bool:
+    """Determine if the dataset is a crypto pair based on its ID."""
+    keywords = {"ETH", "BTC", "USDT", "BNB", "XRP", "SOL", "ADA", "DOGE"}
+    upper_id = dataset_id.upper()
+    return any(k in upper_id for k in keywords)
 
 
 def _build_series_from_wide(df: pd.DataFrame, column_map: Dict[str, str]) -> Optional[Dict[str, List[Dict[str, Any]]]]:
@@ -298,10 +302,11 @@ def resample_price_data(data: pd.DataFrame, interval: str) -> pd.DataFrame:
 
 
 @lru_cache(maxsize=None)
-def _build_payload(dataset_id: str, normalized_interval: str) -> Dict[str, List[Dict]]:
+def _build_payload(dataset_id: str, normalized_interval: str) -> Dict[str, Any]:
     base_data = get_price_data(dataset_id)
     working = resample_price_data(base_data, normalized_interval)
-    return format_chart_payload(working)
+    is_crypto = is_crypto_dataset(dataset_id)
+    return format_chart_payload(working, is_crypto)
 
 
 def get_dataset_summary(dataset_id: str) -> Dict[str, Any]:
@@ -318,7 +323,7 @@ def get_dataset_summary(dataset_id: str) -> Dict[str, Any]:
     }
 
 
-def format_chart_payload(data: pd.DataFrame) -> Dict[str, List[Dict]]:
+def format_chart_payload(data: pd.DataFrame, is_crypto: bool = False) -> Dict[str, Any]:
     candles: List[Dict] = []
     volumes: List[Dict] = []
     rsi_points: List[Dict] = []
@@ -331,11 +336,7 @@ def format_chart_payload(data: pd.DataFrame) -> Dict[str, List[Dict]]:
     )
 
     for timestamp, row in data.iterrows():
-        time_payload = {
-            "year": int(timestamp.year),
-            "month": int(timestamp.month),
-            "day": int(timestamp.day),
-        }
+        time_payload = _normalize_time_payload(timestamp, is_crypto)
         candle = {
             "time": time_payload,
             "open": float(row["open"]),
@@ -359,7 +360,9 @@ def format_chart_payload(data: pd.DataFrame) -> Dict[str, List[Dict]]:
         obv_points.append(
             {"time": time_payload, "value": float(obv_series.loc[timestamp])}
         )
+
     return {
+        "type": "crypto" if is_crypto else "stock",
         "candles": candles,
         "volumes": volumes,
         "rsi": rsi_points,
@@ -1007,60 +1010,220 @@ def index() -> str:
                 ...overrides,
             });
 
-        const priceChart = createChart(priceContainer);
-        const obvChart = createChart(obvContainer, {
-            grid: {
-                vertLines: { color: "rgba(30, 36, 54, 0.45)" },
-                horzLines: { color: "rgba(30, 36, 54, 0.3)" },
-            },
-        });
-        const rsiChart = createChart(rsiContainer, {
-            grid: {
-                vertLines: { color: "rgba(30, 36, 54, 0.45)" },
-                horzLines: { color: "rgba(30, 36, 54, 0.3)" },
-            },
-        });
-        const timeAxisChart = timeAxisContainer
-            ? createChart(timeAxisContainer, {
-                  layout: {
-                      background: { color: "rgba(0, 0, 0, 0)" },
-                      textColor: "#dfe4ff",
-                      fontFamily:
-                          '"JetBrains Mono", "Roboto Mono", "Inter", sans-serif',
-                      fontSize: 11,
-                  },
-                  grid: {
-                      vertLines: { color: "rgba(0, 0, 0, 0)" },
-                      horzLines: { color: "rgba(0, 0, 0, 0)" },
-                  },
-                  crosshair: {
-                      mode: LightweightCharts.CrosshairMode.Hidden,
-                  },
-                  handleScroll: false,
-                  handleScale: false,
-                  leftPriceScale: { visible: false },
-                  rightPriceScale: { visible: false },
-                  timeScale: {
-                      borderColor: "rgba(31, 43, 77, 0.6)",
-                      textColor: "#dfe4ff",
-                      lockVisibleTimeRangeOnResize: true,
-                      ticksVisible: true,
-                      timeVisible: false,
-                      secondsVisible: false,
-                      rightOffset: 8,
-                      tickMarkFormatter: formatKoreanTick,
-                  },
-              })
-            : null;
-        const timeAxisSeries = timeAxisChart
-            ? timeAxisChart.addLineSeries({
-                  color: "rgba(0,0,0,0)",
-                  lineWidth: 0,
-                  priceLineVisible: false,
-                  lastValueVisible: false,
-                  crosshairMarkerVisible: false,
-              })
-            : null;
+        let priceChart, obvChart, rsiChart, timeAxisChart;
+        let candleSeries, volumeSeries, rsiSeries, obvSeries, timeAxisSeries;
+        let currentChartType = null;
+
+        const destroyCharts = () => {
+            if (resizeObserverInstance) {
+                resizeObserverInstance.disconnect();
+            }
+            [priceChart, obvChart, rsiChart, timeAxisChart].forEach((chart) => {
+                if (chart) {
+                    chart.remove();
+                }
+            });
+            priceContainer.innerHTML = "";
+            obvContainer.innerHTML = "";
+            rsiContainer.innerHTML = "";
+            if (timeAxisContainer) timeAxisContainer.innerHTML = "";
+            
+            priceChart = null;
+            obvChart = null;
+            rsiChart = null;
+            timeAxisChart = null;
+            candleSeries = null;
+            volumeSeries = null;
+            rsiSeries = null;
+            obvSeries = null;
+            timeAxisSeries = null;
+            charts.length = 0;
+            containerChartMap.clear();
+        };
+
+        const initializeCharts = () => {
+            priceChart = createChart(priceContainer);
+            obvChart = createChart(obvContainer, {
+                grid: {
+                    vertLines: { color: "rgba(30, 36, 54, 0.45)" },
+                    horzLines: { color: "rgba(30, 36, 54, 0.3)" },
+                },
+            });
+            rsiChart = createChart(rsiContainer, {
+                grid: {
+                    vertLines: { color: "rgba(30, 36, 54, 0.45)" },
+                    horzLines: { color: "rgba(30, 36, 54, 0.3)" },
+                },
+            });
+            timeAxisChart = timeAxisContainer
+                ? createChart(timeAxisContainer, {
+                      layout: {
+                          background: { color: "rgba(0, 0, 0, 0)" },
+                          textColor: "#dfe4ff",
+                          fontFamily:
+                              '"JetBrains Mono", "Roboto Mono", "Inter", sans-serif',
+                          fontSize: 11,
+                      },
+                      grid: {
+                          vertLines: { color: "rgba(0, 0, 0, 0)" },
+                          horzLines: { color: "rgba(0, 0, 0, 0)" },
+                      },
+                      crosshair: {
+                          mode: LightweightCharts.CrosshairMode.Hidden,
+                      },
+                      handleScroll: false,
+                      handleScale: false,
+                      leftPriceScale: { visible: false },
+                      rightPriceScale: { visible: false },
+                      timeScale: {
+                          borderColor: "rgba(31, 43, 77, 0.6)",
+                          textColor: "#dfe4ff",
+                          lockVisibleTimeRangeOnResize: true,
+                          ticksVisible: true,
+                          timeVisible: false,
+                          secondsVisible: false,
+                          rightOffset: 8,
+                          tickMarkFormatter: formatKoreanTick,
+                      },
+                  })
+                : null;
+            
+            timeAxisSeries = timeAxisChart
+                ? timeAxisChart.addLineSeries({
+                      color: "rgba(0,0,0,0)",
+                      lineWidth: 0,
+                      priceLineVisible: false,
+                      lastValueVisible: false,
+                      crosshairMarkerVisible: false,
+                  })
+                : null;
+
+            hideTimeAxis(priceChart);
+            hideTimeAxis(obvChart);
+            showTimeAxis(rsiChart);
+            
+            if (timeAxisChart) {
+                timeAxisChart.priceScale("right").applyOptions({
+                    visible: false,
+                });
+                timeAxisChart.timeScale().applyOptions({
+                    visible: true,
+                    borderColor: "rgba(31, 43, 77, 0.6)",
+                    textColor: "#cfd7fd",
+                    lockVisibleTimeRangeOnResize: true,
+                    tickMarkFormatter: formatKoreanTick,
+                });
+            }
+
+            priceChart.priceScale("right").applyOptions({
+                textColor: "#ffffff",
+                scaleMargins: {
+                    top: 0.05,
+                    bottom: 0.05,
+                },
+            });
+            rsiChart.priceScale("right").applyOptions({
+                textColor: "#ffffff",
+                scaleMargins: {
+                    top: 0.2,
+                    bottom: 0.2,
+                },
+            });
+            obvChart.priceScale("right").applyOptions({
+                textColor: "#ffffff",
+                scaleMargins: {
+                    top: 0.2,
+                    bottom: 0.2,
+                },
+            });
+
+            candleSeries = priceChart.addCandlestickSeries({
+                upColor: "#089981",
+                downColor: "#f23645",
+                wickUpColor: "#089981",
+                wickDownColor: "#f23645",
+                borderUpColor: "#089981",
+                borderDownColor: "#f23645",
+            });
+
+            volumeSeries = priceChart.addHistogramSeries({
+                priceScaleId: "left",
+                base: 0,
+                priceFormat: {
+                    type: "volume",
+                },
+                priceLineVisible: false,
+                color: "rgba(60, 120, 216, 0.5)",
+                scaleMargins: {
+                    top: 0.85,
+                    bottom: 0,
+                },
+            });
+            priceChart.priceScale("left").applyOptions({
+                visible: false,
+                scaleMargins: {
+                    top: 0.85,
+                    bottom: 0,
+                },
+            });
+
+            rsiSeries = rsiChart.addLineSeries({
+                color: "#9b59b6",
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: true,
+            });
+            
+            obvSeries = obvChart.addLineSeries({
+                color: "#f5a623",
+                lineWidth: 3,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: true,
+                priceFormat: {
+                    type: "custom",
+                    minMove: 0.01,
+                    formatter: (price) => formatCompactNumber(price),
+                },
+            });
+
+            obvChart.priceScale("right").applyOptions({
+                mode: LightweightCharts.PriceScaleMode.Normal,
+                autoScale: true,
+            });
+
+            const drawLevelLine = (price) =>
+                rsiSeries.createPriceLine({
+                    price,
+                    color: "rgba(255, 255, 255, 0.25)",
+                    lineWidth: 1,
+                    lineStyle: LightweightCharts.LineStyle.Dashed,
+                    axisLabelVisible: false,
+                });
+
+            drawLevelLine(70);
+            drawLevelLine(30);
+
+            registerChart(priceChart);
+            registerChart(obvChart);
+            registerChart(rsiChart);
+            if (timeAxisChart) registerChart(timeAxisChart);
+            
+            observeChartContainer(priceContainer, priceChart);
+            observeChartContainer(obvContainer, obvChart);
+            observeChartContainer(rsiContainer, rsiChart);
+            if (timeAxisContainer) observeChartContainer(timeAxisContainer, timeAxisChart);
+
+            priceChart.subscribeCrosshairMove((param) => {
+                if (!param || !param.time) {
+                    updateStatusBar(null);
+                    return;
+                }
+                const key = createTimeKey(param.time);
+                updateStatusBar(key);
+            });
+        };
 
         const hideTimeAxis = (chart) => {
             if (!chart) return;
@@ -1098,100 +1261,20 @@ def index() -> str:
             });
         }
 
-        priceChart.priceScale("right").applyOptions({
-            textColor: "#ffffff",
-            scaleMargins: {
-                top: 0.05,
-                bottom: 0.05,
-            },
-        });
-        rsiChart.priceScale("right").applyOptions({
-            textColor: "#ffffff",
-            scaleMargins: {
-                top: 0.2,
-                bottom: 0.2,
-            },
-        });
-        obvChart.priceScale("right").applyOptions({
-            textColor: "#ffffff",
-            scaleMargins: {
-                top: 0.2,
-                bottom: 0.2,
-            },
-        });
 
-        const candleSeries = priceChart.addCandlestickSeries({
-            upColor: "%(up)s",
-            downColor: "%(down)s",
-            wickUpColor: "%(up)s",
-            wickDownColor: "%(down)s",
-            borderUpColor: "%(up)s",
-            borderDownColor: "%(down)s",
-        });
-
-        const volumeSeries = priceChart.addHistogramSeries({
-            priceScaleId: "left",
-            base: 0,
-            priceFormat: {
-                type: "volume",
-            },
-            priceLineVisible: false,
-            color: "rgba(60, 120, 216, 0.5)",
-            scaleMargins: {
-                top: 0.85,
-                bottom: 0,
-            },
-        });
-        priceChart.priceScale("left").applyOptions({
-            visible: false,
-            scaleMargins: {
-                top: 0.85,
-                bottom: 0,
-            },
-        });
-
-        const rsiSeries = rsiChart.addLineSeries({
-            color: "%(rsi)s",
-            lineWidth: 2,
-            priceLineVisible: false,
-            lastValueVisible: false,
-            crosshairMarkerVisible: true,
-        });
-        const obvSeries = obvChart.addLineSeries({
-            color: "%(obv)s",
-            lineWidth: 3,
-            priceLineVisible: false,
-            lastValueVisible: false,
-            crosshairMarkerVisible: true,
-            priceFormat: {
-                type: "custom",
-                minMove: 0.01,
-                formatter: (price) => formatCompactNumber(price),
-            },
-        });
-
-        obvChart.priceScale("right").applyOptions({
-            mode: LightweightCharts.PriceScaleMode.Normal,
-            autoScale: true,
-        });
-
-        const drawLevelLine = (price) =>
-            rsiSeries.createPriceLine({
-                price,
-                color: "rgba(255, 255, 255, 0.25)",
-                lineWidth: 1,
-                lineStyle: LightweightCharts.LineStyle.Dashed,
-                axisLabelVisible: false,
-            });
-
-        drawLevelLine(70);
-        drawLevelLine(30);
 
         let syncing = false;
 
         const createTimeKey = (time) => {
             if (!time) return null;
             if (typeof time === "string") return time;
+            if (typeof time === "number") {
+                const date = new Date(time * 1000);
+                const year = date.getUTCFullYear();
+                const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+                const day = String(date.getUTCDate()).padStart(2, "0");
+                return `${year}-${month}-${day}`;
+            }
             if (typeof time === "object" && "year" in time) {
                 const year = time.year ?? time.year;
                 const month = String(time.month ?? time.month ?? 0).padStart(2, "0");
@@ -1453,9 +1536,7 @@ def index() -> str:
                 : "--";
         };
 
-        const charts = [priceChart, obvChart, rsiChart, timeAxisChart].filter(
-            Boolean
-        );
+        const charts = [];
         const subscribeChart = (chart) => {
             chart
                 .timeScale()
@@ -1474,7 +1555,7 @@ def index() -> str:
             syncing = false;
         };
 
-        charts.forEach(subscribeChart);
+
 
         const registerChart = (chart) => {
             if (!chart) return;
@@ -1512,6 +1593,16 @@ def index() -> str:
                 }
                 const data = await response.json();
                 if (token !== requestCounter) return;
+
+                if (data.type && data.type !== currentChartType) {
+                    destroyCharts();
+                    initializeCharts();
+                    currentChartType = data.type;
+                } else if (!priceChart) {
+                    initializeCharts();
+                    currentChartType = data.type || "stock";
+                }
+
                 candleSeries.setData(data.candles);
                 if (timeAxisSeries) {
                     timeAxisSeries.setData(
@@ -1645,25 +1736,10 @@ def index() -> str:
             });
         }
 
-        priceChart.subscribeCrosshairMove((param) => {
-            if (!param || !param.time) {
-                updateStatusBar(null);
-                return;
-            }
-            const key = createTimeKey(param.time);
-            updateStatusBar(key);
-        });
-
         setActiveIntervalButton(currentInterval);
         updateVolumeButton();
         updateCvdButtonState();
-        bootstrapDatasets();
-
-        observeChartContainer(priceContainer, priceChart);
-        observeChartContainer(obvContainer, obvChart);
-        observeChartContainer(rsiContainer, rsiChart);
-        observeChartContainer(timeAxisContainer, timeAxisChart);
-
+        
         const resizeObserver = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 const chart = containerChartMap.get(entry.target);
@@ -1673,9 +1749,8 @@ def index() -> str:
             }
         });
         resizeObserverInstance = resizeObserver;
-        containerChartMap.forEach((_, container) =>
-            resizeObserver.observe(container)
-        );
+
+        bootstrapDatasets();
     </script>
 </body>
 </html>

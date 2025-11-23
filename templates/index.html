@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ETH/USDT · 캔들 차트</title>
+    <link rel="preconnect" href="https://unpkg.com" />
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+    <header>
+        <div class="header-title">
+            <h1>멀티 데이터셋 · 캔들 차트</h1>
+            <p id="dataset-meta">데이터셋 정보를 불러오는 중...</p>
+        </div>
+        <div class="header-controls">
+            <div class="dataset-picker">
+                <label for="dataset-select">DATASET</label>
+                <select id="dataset-select" aria-label="데이터셋 선택"></select>
+            </div>
+            <button type="button" id="cvd-toggle" class="pill-button" disabled>수급분석</button>
+            <div class="interval-toggle" role="group" aria-label="차트 주기 선택">
+                <button type="button" class="interval-button active" data-interval="1d">1일</button>
+                <button type="button" class="interval-button" data-interval="3d">3일</button>
+                <button type="button" class="interval-button" data-interval="1w">1주</button>
+            </div>
+        </div>
+    </header>
+    <div class="status-bar">
+        <div class="status-left">
+            <span id="status-symbol" class="status-symbol">--</span>
+            <span id="status-range" class="status-range">--</span>
+        </div>
+        <div class="status-values">
+            <span class="status-value date"><strong>DATE</strong><span id="status-date" class="status-data">--</span></span>
+            <span class="status-value"><strong>O</strong><span id="status-open" class="status-data">--</span></span>
+            <span class="status-value"><strong>H</strong><span id="status-high" class="status-data">--</span></span>
+            <span class="status-value"><strong>L</strong><span id="status-low" class="status-data">--</span></span>
+            <span class="status-value"><strong>C</strong><span id="status-close" class="status-data">--</span></span>
+            <span class="status-value"><strong>V</strong><span id="status-volume" class="status-data">--</span></span>
+            <span class="status-value"><strong>RSI</strong><span id="status-rsi" class="status-data">--</span></span>
+            <span class="status-value"><strong>OBV</strong><span id="status-obv" class="status-data">--</span></span>
+        </div>
+    </div>
+    <main>
+        <div class="chart-stack">
+            <div class="chart-panel price">
+                <div class="chart-toolbar">
+                    <button type="button" id="volume-toggle" class="pill-button active">거래량 표시</button>
+                </div>
+            <div id="price-chart" class="chart-surface"></div>
+        </div>
+        <div id="obv-chart" class="chart-panel obv"></div>
+        <div id="rsi-chart" class="chart-panel rsi"></div>
+        <div id="time-axis-chart" class="chart-panel time-axis"></div>
+    </div>
+</main>
+    <div id="cvd-modal" class="cvd-modal">
+        <div class="cvd-modal-panel">
+            <div class="cvd-modal-header">
+                <div>
+                    <h2>수급분석</h2>
+                    <p id="cvd-meta" style="margin:0;color:#69739a;font-size:0.75rem;">데이터 로드 중...</p>
+                </div>
+                <button type="button" id="cvd-close" class="pill-button">닫기</button>
+            </div>
+            <div class="cvd-modal-body">
+                    <div class="cvd-chart-container">
+                        <div class="cvd-legend">
+                            <span><i style="background:#ff8c5a"></i>기관</span>
+                            <span><i style="background:#00c8ff"></i>외국인</span>
+                            <span><i style="background:#f5e663"></i>개인</span>
+                        </div>
+                        <div id="cvd-chart" class="chart-surface"></div>
+                    </div>
+                <div class="cvd-table-wrapper">
+                    <div id="cvd-table-header" class="cvd-table-header"></div>
+                    <div id="cvd-table" class="cvd-table-body"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/static/js/main.js"></script>
+</body>
+</html>
