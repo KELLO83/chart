@@ -12,18 +12,6 @@ from indicator.obv import compute_obv
 
 
 DATA_DIR = Path(__file__).with_name("stock_data")
-CVD_PRIMARY_DIR = Path(__file__).with_name("cvd")
-CVD_FALLBACK_DIR = DATA_DIR / "cvd"
-CVD_EXPORT_DIR = Path(__file__).with_name("trading_volume_exports")
-CVD_EXPORT_DAILY_DIR = CVD_EXPORT_DIR / "daily_investor"
-CVD_ROLES = ("institutions", "individuals", "foreigners")
-INVESTOR_ROLE_ALIASES: Dict[str, set[str]] = {
-    "institutions": {"기관", "기관합계", "institutions", "institution"},
-    "individuals": {"개인", "individual", "individuals"},
-    "foreigners": {"외국인", "외국인합계", "foreign", "foreigners"},
-}
-LONG_VALUE_CANDIDATES = ("net", "순매수", "value", "values")
-LONG_DIFF_CANDIDATES = (("buy", "sell"), ("매수", "매도"))
 DEFAULT_DATASET_ID = "ETHUSDT_2Y_OHLCV_Trans"
 UP_COLOR = "#089981"
 DOWN_COLOR = "#f23645"
@@ -79,45 +67,6 @@ def normalize_dataset_id(dataset_id: Optional[str]) -> str:
     return target
 
 
-def _iter_cvd_directories() -> List[Path]:
-    directories = []
-    for path in (
-        CVD_EXPORT_DAILY_DIR,
-        CVD_EXPORT_DIR,
-        CVD_PRIMARY_DIR,
-        CVD_FALLBACK_DIR,
-    ):
-        if path.exists() and path.is_dir() and path not in directories:
-            directories.append(path)
-    return directories
-
-
-def _match_cvd_file(dataset_id: str) -> Optional[Path]:
-    base_token = dataset_id.split("_")[0].lower()
-    for directory in _iter_cvd_directories():
-        for path in sorted(directory.iterdir()):
-            if path.suffix.lower() not in {".csv", ".xlsx"}:
-                continue
-            if path.stem.lower().startswith(base_token):
-                return path
-    return None
-
-
-def _extract_cvd_columns(df: pd.DataFrame) -> Optional[Dict[str, str]]:
-    normalized_cols = {col: str(col).lower() for col in df.columns}
-    mapping: Dict[str, Optional[str]] = {"institutions": None, "individuals": None, "foreigners": None}
-    for original, lowered in normalized_cols.items():
-        if mapping["institutions"] is None and ("기관" in lowered or "institution" in lowered):
-            mapping["institutions"] = original
-        elif mapping["individuals"] is None and ("개인" in lowered or "individual" in lowered):
-            mapping["individuals"] = original
-        elif mapping["foreigners"] is None and ("외국" in lowered or "foreign" in lowered):
-            mapping["foreigners"] = original
-    if all(mapping.values()):
-        return mapping  # type: ignore[return-value]
-    return None
-
-
 def _normalize_time_payload(
     date_value: pd.Timestamp, is_crypto: bool = False
 ) -> Union[int, Dict[str, int]]:
@@ -136,137 +85,11 @@ def _normalize_time_payload(
     }
 
 
-def _resolve_investor_role(label: Any) -> Optional[str]:
-    try:
-        normalized = str(label).strip().lower()
-    except Exception:
-        return None
-    for role, aliases in INVESTOR_ROLE_ALIASES.items():
-        if normalized in aliases:
-            return role
-    return None
-
-
-def _resolve_long_value_source(df: pd.DataFrame) -> Optional[Union[str, tuple[str, str]]]:
-    column_lookup = {str(col).strip().lower(): col for col in df.columns}
-    for candidate in LONG_VALUE_CANDIDATES:
-        if candidate in column_lookup:
-            return column_lookup[candidate]
-    for buy_key, sell_key in LONG_DIFF_CANDIDATES:
-        buy_col = column_lookup.get(buy_key)
-        sell_col = column_lookup.get(sell_key)
-        if buy_col and sell_col:
-            return (buy_col, sell_col)
-    return None
-
-
-def _series_payload_from_dataframe(source: pd.DataFrame) -> Optional[Dict[str, List[Dict[str, Any]]]]:
-    if source.empty:
-        return None
-    payload: Dict[str, List[Dict[str, Any]]] = {role: [] for role in CVD_ROLES}
-    ordered = source.sort_index()
-    for idx, row in ordered.iterrows():
-        timestamp = pd.Timestamp(idx)
-        time_value = _normalize_time_payload(timestamp)
-        for role in CVD_ROLES:
-            value = row.get(role)
-            if value is None or pd.isna(value):
-                continue
-            try:
-                numeric = float(value)
-            except (TypeError, ValueError):
-                continue
-            payload[role].append({"time": time_value, "value": numeric})
-    if not any(payload.values()):
-        return None
-    return payload
-
-
 def is_crypto_dataset(dataset_id: str) -> bool:
     """Determine if the dataset is a crypto pair based on its ID."""
     keywords = {"ETH", "BTC", "USDT", "BNB", "XRP", "SOL", "ADA", "DOGE"}
     upper_id = dataset_id.upper()
     return any(k in upper_id for k in keywords)
-
-
-def _build_series_from_wide(df: pd.DataFrame, column_map: Dict[str, str]) -> Optional[Dict[str, List[Dict[str, Any]]]]:
-    working = pd.DataFrame({"date": df["date"]})
-    for role, column_name in column_map.items():
-        if column_name not in df.columns:
-            continue
-        working[role] = pd.to_numeric(df[column_name], errors="coerce")
-    working = working.dropna(subset=["date"]).sort_values("date")
-    if working.empty:
-        return None
-    working = working.set_index("date")
-    for role in CVD_ROLES:
-        if role not in working.columns:
-            working[role] = pd.NA
-    working = working[list(CVD_ROLES)]
-    return _series_payload_from_dataframe(working)
-
-
-def _build_series_from_long(df: pd.DataFrame) -> Optional[Dict[str, List[Dict[str, Any]]]]:
-    if "date" not in df.columns or "investor" not in df.columns:
-        return None
-    value_source = _resolve_long_value_source(df)
-    if value_source is None:
-        return None
-    working = df.copy()
-    if isinstance(value_source, tuple):
-        buy_col, sell_col = value_source
-        buy_values = pd.to_numeric(working[buy_col], errors="coerce")
-        sell_values = pd.to_numeric(working[sell_col], errors="coerce")
-        working["_net_value"] = buy_values - sell_values
-    else:
-        working["_net_value"] = pd.to_numeric(working[value_source], errors="coerce")
-    working["investor_role"] = working["investor"].apply(_resolve_investor_role)
-    working = working.dropna(subset=["date", "_net_value", "investor_role"])
-    if working.empty:
-        return None
-    aggregated = (
-        working.groupby(["date", "investor_role"])["_net_value"]
-        .sum()
-        .unstack(fill_value=0.0)
-        .sort_index()
-    )
-    aggregated = aggregated.reindex(columns=CVD_ROLES, fill_value=0.0)
-    return _series_payload_from_dataframe(aggregated)
-
-
-def load_cvd_payload(dataset_id: str) -> Optional[Dict[str, Any]]:
-    cvd_file = _match_cvd_file(dataset_id)
-    if not cvd_file:
-        return None
-    try:
-        if cvd_file.suffix.lower() == ".csv":
-            df = pd.read_csv(cvd_file)
-        else:
-            df = pd.read_excel(cvd_file)
-    except Exception:
-        return None
-    if "date" not in df.columns:
-        return None
-    try:
-        df["date"] = pd.to_datetime(df["date"])
-    except Exception:
-        return None
-    df = df.dropna(subset=["date"]).sort_values("date")
-    long_series = _build_series_from_long(df)
-    if long_series:
-        return {
-            "available": True,
-            "series": long_series,
-        }
-    column_map = _extract_cvd_columns(df)
-    if column_map:
-        wide_series = _build_series_from_wide(df, column_map)
-        if wide_series:
-            return {
-                "available": True,
-                "series": wide_series,
-            }
-    return None
 
 
 @lru_cache(maxsize=None)
@@ -326,13 +149,11 @@ def get_dataset_summary(dataset_id: str) -> Dict[str, Any]:
     data = get_price_data(dataset_id)
     start = data.index.min()
     end = data.index.max()
-    cvd_available = load_cvd_payload(dataset_id) is not None
     return {
         "id": dataset_id,
         "label": dataset_id.replace("_", " "),
         "rows": len(data),
         "range": f"{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}",
-        "cvd": cvd_available,
     }
 
 
@@ -399,7 +220,6 @@ def read_candles(
 
     try:
         payload = _build_payload(dataset_id, normalized_interval)
-        payload["cvd"] = load_cvd_payload(dataset_id)
         return payload
     except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -668,125 +488,6 @@ def index() -> str:
         .status-value.date {
             min-width: 180px;
         }
-        .cvd-modal {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.75);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.2s ease;
-            z-index: 20;
-        }
-        .cvd-modal.visible {
-            opacity: 1;
-            pointer-events: auto;
-        }
-        .cvd-modal-panel {
-            width: min(1400px, 95vw);
-            max-height: 92vh;
-            background: #050810;
-            border: 1px solid #202538;
-            border-radius: 14px;
-            box-shadow: 0 20px 80px rgba(0, 0, 0, 0.65);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        .cvd-modal-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 1rem 1.25rem;
-            border-bottom: 1px solid #131829;
-            background: #070a13;
-        }
-        .cvd-modal-header h2 {
-            font-size: 1rem;
-            color: #f5f6ff;
-            margin: 0;
-        }
-        .cvd-modal-body {
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-            padding: 1rem 1.25rem 1.25rem;
-            overflow: hidden;
-        }
-        .cvd-chart-container {
-            height: 260px;
-            border: 1px solid #161a28;
-            border-radius: 10px;
-            overflow: hidden;
-            position: relative;
-        }
-        .cvd-legend {
-            position: absolute;
-            top: 0.75rem;
-            right: 1rem;
-            display: flex;
-            gap: 1rem;
-            font-size: 0.75rem;
-            color: #a9b4d6;
-            font-family: "Pretendard", sans-serif;
-        }
-        .cvd-legend span {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.35rem;
-        }
-        .cvd-legend i {
-            width: 14px;
-            height: 4px;
-            border-radius: 999px;
-            display: inline-block;
-        }
-        .cvd-table-wrapper {
-            border: 1px solid #161a28;
-            border-radius: 10px;
-            overflow: hidden;
-            background: #020408;
-            display: flex;
-            flex-direction: column;
-            max-height: 340px;
-        }
-        .cvd-table-header,
-        .cvd-table-body {
-            display: grid;
-            grid-template-columns: 120px repeat(3, 1fr);
-        }
-        .cvd-table-header {
-            background: #0c111d;
-            padding: 0.65rem 1rem;
-            font-size: 0.75rem;
-            color: #7f8db4;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-        .cvd-table-row {
-            padding: 0.55rem 1rem;
-            font-family: "JetBrains Mono", monospace;
-            font-size: 0.8rem;
-            color: #dfe4ff;
-            border-top: 1px solid #101426;
-            display: contents;
-        }
-        .cvd-table-row span {
-            padding: 0.55rem 1rem;
-            display: flex;
-            align-items: center;
-        }
-        .cvd-table-body {
-            overflow-y: auto;
-        }
-        .cvd-positive {
-            color: #1dd09c;
-        }
-        .cvd-negative {
-            color: #ff6f6f;
-        }
     </style>
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -801,7 +502,6 @@ def index() -> str:
                 <label for="dataset-select">DATASET</label>
                 <select id="dataset-select" aria-label="데이터셋 선택"></select>
             </div>
-            <button type="button" id="cvd-toggle" class="pill-button" disabled>수급분석</button>
             <div class="interval-toggle" role="group" aria-label="차트 주기 선택">
                 <button type="button" class="interval-button active" data-interval="1d">1일</button>
                 <button type="button" class="interval-button" data-interval="3d">3일</button>
@@ -838,52 +538,16 @@ def index() -> str:
         <div id="time-axis-chart" class="chart-panel time-axis"></div>
     </div>
 </main>
-    <div id="cvd-modal" class="cvd-modal">
-        <div class="cvd-modal-panel">
-            <div class="cvd-modal-header">
-                <div>
-                    <h2>수급분석</h2>
-                    <p id="cvd-meta" style="margin:0;color:#69739a;font-size:0.75rem;">데이터 로드 중...</p>
-                </div>
-                <button type="button" id="cvd-close" class="pill-button">닫기</button>
-            </div>
-            <div class="cvd-modal-body">
-                    <div class="cvd-chart-container">
-                        <div class="cvd-legend">
-                            <span><i style="background:#ff8c5a"></i>기관</span>
-                            <span><i style="background:#00c8ff"></i>외국인</span>
-                            <span><i style="background:#f5e663"></i>개인</span>
-                        </div>
-                        <div id="cvd-chart" class="chart-surface"></div>
-                    </div>
-                <div class="cvd-table-wrapper">
-                    <div class="cvd-table-header">
-                        <span>일자</span>
-                        <span>기관</span>
-                        <span>개인</span>
-                        <span>외국인</span>
-                    </div>
-                    <div id="cvd-table" class="cvd-table-body"></div>
-                </div>
-            </div>
-        </div>
-    </div>
     <script>
         const priceContainer = document.getElementById("price-chart");
         const rsiContainer = document.getElementById("rsi-chart");
         const obvContainer = document.getElementById("obv-chart");
         const timeAxisContainer = document.getElementById("time-axis-chart");
-        const cvdContainer = document.getElementById("cvd-chart");
-        const cvdModal = document.getElementById("cvd-modal");
-        const cvdClose = document.getElementById("cvd-close");
-        const cvdMeta = document.getElementById("cvd-meta");
-        const cvdTableBody = document.getElementById("cvd-table");
         const datasetSelect = document.getElementById("dataset-select");
         const datasetMeta = document.getElementById("dataset-meta");
         const intervalButtons = document.querySelectorAll(
             ".interval-toggle .interval-button"
         );
-        const cvdToggle = document.getElementById("cvd-toggle");
         const volumeToggle = document.getElementById("volume-toggle");
         const statusSymbol = document.getElementById("status-symbol");
         const statusRange = document.getElementById("status-range");
@@ -901,11 +565,6 @@ def index() -> str:
         let datasetList = [];
         let latestVolumeData = [];
         let isVolumeVisible = true;
-        let cvdChart = null;
-        let cvdSeries = null;
-        let cvdDataCache = null;
-        let cvdAvailable = false;
-        let cvdModalVisible = false;
         let candleMap = new Map();
         let volumeMap = new Map();
         let rsiMap = new Map();
@@ -1307,24 +966,16 @@ def index() -> str:
         };
 
         const setDatasetMeta = (info) => {
-            if (!info) {
-                datasetMeta.textContent = "데이터셋 정보를 불러올 수 없습니다.";
-                statusSymbol.textContent = "--";
-                statusRange.textContent = "--";
-                if (cvdMeta) {
-                    cvdMeta.textContent = "수급 데이터 없음";
-                }
-                return;
-            }
-            datasetMeta.textContent = `${info.label} · ${info.range} · ${info.rows}건`;
-            statusSymbol.textContent = info.label;
-            statusRange.textContent = info.range;
-            if (cvdMeta) {
-                cvdMeta.textContent = info.cvd
-                    ? `${info.label} · ${info.range}`
-                    : "수급 데이터 없음";
-            }
-        };
+        if (!info) {
+            datasetMeta.textContent = "데이터셋 정보를 불러올 수 없습니다.";
+            statusSymbol.textContent = "--";
+            statusRange.textContent = "--";
+            return;
+        }
+        datasetMeta.textContent = `${info.label} · ${info.range} · ${info.rows}건`;
+        statusSymbol.textContent = info.label;
+        statusRange.textContent = info.range;
+    };
 
         const updateVolumeButton = () => {
             if (!volumeToggle) return;
@@ -1344,173 +995,6 @@ def index() -> str:
             volumeSeries.applyOptions({ visible: isVolumeVisible });
         };
 
-        const updateCvdButtonState = () => {
-            if (!cvdToggle) return;
-            if (!cvdAvailable) {
-                cvdToggle.disabled = true;
-                cvdToggle.classList.remove("active");
-                cvdToggle.textContent = "수급분석 없음";
-                return;
-            }
-            cvdToggle.disabled = false;
-            cvdToggle.classList.remove("active");
-            cvdToggle.textContent = "수급분석";
-        };
-
-        const ensureCvdChart = () => {
-            if (cvdChart || !cvdContainer) return;
-            cvdChart = createChart(cvdContainer, {
-                grid: {
-                    vertLines: { color: "rgba(30, 36, 54, 0.45)" },
-                    horzLines: { color: "rgba(30, 36, 54, 0.3)" },
-                },
-            });
-            cvdChart.priceScale("right").applyOptions({
-                textColor: "#ffffff",
-                scaleMargins: { top: 0.2, bottom: 0.2 },
-            });
-            cvdSeries = {
-                institutions: cvdChart.addLineSeries({
-                    color: "#ff8c5a",
-                    lineWidth: 2,
-                    priceLineVisible: false,
-                    crosshairMarkerVisible: true,
-                }),
-                foreigners: cvdChart.addLineSeries({
-                    color: "#00c8ff",
-                    lineWidth: 2,
-                    priceLineVisible: false,
-                    crosshairMarkerVisible: true,
-                }),
-                individuals: cvdChart.addLineSeries({
-                    color: "#f5e663",
-                    lineWidth: 2,
-                    priceLineVisible: false,
-                    crosshairMarkerVisible: true,
-                }),
-            };
-            registerChart(cvdChart);
-            observeChartContainer(cvdContainer, cvdChart);
-        };
-
-        const accumulateCvdSeries = (series) => {
-            const entries = new Map();
-            const roles = ["institutions", "individuals", "foreigners"];
-            const ensureEntry = (point) => {
-                const keyStr = createTimeKey(point.time);
-                if (!keyStr) return null;
-                if (!entries.has(keyStr)) {
-                    entries.set(keyStr, { time: point.time });
-                }
-                return { key: keyStr, entry: entries.get(keyStr) };
-            };
-            roles.forEach((role) => {
-                (series[role] ?? []).forEach((point) => {
-                    const ensured = ensureEntry(point);
-                    if (!ensured) return;
-                    ensured.entry[role] =
-                        (ensured.entry[role] ?? 0) + Number(point.value || 0);
-                });
-            });
-            const sorted = Array.from(entries.entries()).sort(([a], [b]) =>
-                a.localeCompare(b)
-            );
-            const totals = {
-                institutions: 0,
-                individuals: 0,
-                foreigners: 0,
-            };
-            const accumulatedSeries = {
-                institutions: [],
-                individuals: [],
-                foreigners: [],
-            };
-            const rows = [];
-            sorted.forEach(([dateKey, entry]) => {
-                roles.forEach((role) => {
-                    const delta = entry[role] ?? 0;
-                    totals[role] += delta;
-                    accumulatedSeries[role].push({
-                        time: entry.time,
-                        value: totals[role],
-                    });
-                });
-                rows.push({
-                    date: dateKey,
-                    institutions: totals.institutions,
-                    individuals: totals.individuals,
-                    foreigners: totals.foreigners,
-                });
-            });
-            return {
-                series: accumulatedSeries,
-                rows: rows.reverse(),
-            };
-        };
-
-        const formatSigned = (value) => {
-            if (value === null || value === undefined || Number.isNaN(value)) {
-                return "<span>--</span>";
-            }
-            const cls = value > 0 ? "cvd-positive" : value < 0 ? "cvd-negative" : "";
-            const formatted = Number(value).toLocaleString("en-US");
-            return `<span class="${cls}">${formatted}</span>`;
-        };
-
-        const renderCvdTable = (rows) => {
-            if (!cvdTableBody) return;
-            if (!rows || !rows.length) {
-                cvdTableBody.innerHTML =
-                    '<div class="cvd-table-row"><span>데이터 없음</span></div>';
-                return;
-            }
-            const html = rows
-                .map(
-                    (row) => `
-                <div class="cvd-table-row">
-                    <span>${row.date}</span>
-                    ${formatSigned(row.institutions)}
-                    ${formatSigned(row.individuals)}
-                    ${formatSigned(row.foreigners)}
-                </div>`
-                )
-                .join("");
-            cvdTableBody.innerHTML = html;
-        };
-
-        const applyCvdSeriesData = (seriesData) => {
-            if (!seriesData) return;
-            ensureCvdChart();
-            if (!cvdSeries) return;
-            const accumulated = accumulateCvdSeries(seriesData);
-            cvdSeries.institutions.setData(accumulated.series.institutions ?? []);
-            cvdSeries.foreigners.setData(accumulated.series.foreigners ?? []);
-            cvdSeries.individuals.setData(accumulated.series.individuals ?? []);
-            renderCvdTable(accumulated.rows);
-            if (cvdModalVisible && cvdChart) {
-                cvdChart.timeScale().fitContent();
-            }
-        };
-
-        const openCvdModal = () => {
-            if (!cvdAvailable || !cvdDataCache || !cvdModal) return;
-            ensureCvdChart();
-            cvdModal.classList.add("visible");
-            document.body.classList.add("modal-open");
-            cvdModalVisible = true;
-            cvdToggle?.classList.add("active");
-            if (cvdChart) {
-                cvdChart.timeScale().fitContent();
-            }
-        };
-
-        const closeCvdModal = () => {
-            if (!cvdModalVisible || !cvdModal) return;
-            cvdModal.classList.remove("visible");
-            document.body.classList.remove("modal-open");
-            cvdModalVisible = false;
-            cvdToggle?.classList.remove("active");
-        };
 
         const formatNumber = (value, digits = 2) => {
             if (value === null || value === undefined || Number.isNaN(value)) {
@@ -1632,14 +1116,6 @@ def index() -> str:
                 obvMap = buildDataMap(data.obv);
                 const lastCandle = data.candles[data.candles.length - 1];
                 latestTimeKey = lastCandle ? createTimeKey(lastCandle.time) : null;
-                cvdDataCache = data.cvd?.series ?? null;
-                cvdAvailable = Boolean(cvdDataCache);
-                if (cvdAvailable) {
-                    applyCvdSeriesData(cvdDataCache);
-                } else {
-                    closeCvdModal();
-                }
-                updateCvdButtonState();
                 syncVolumeSeries();
                 rsiSeries.setData(data.rsi);
                 obvSeries.setData(data.obv);
@@ -1694,10 +1170,6 @@ def index() -> str:
                 currentDataset = fallback.id;
                 datasetSelect.value = currentDataset;
                 setDatasetMeta(fallback);
-                cvdAvailable = Boolean(fallback.cvd);
-                cvdDataCache = null;
-                closeCvdModal();
-                updateCvdButtonState();
                 await loadInterval(currentInterval, currentDataset);
             } catch (error) {
                 console.error(error);
@@ -1712,10 +1184,6 @@ def index() -> str:
             currentDataset = selected;
             const meta = datasetList.find((item) => item.id === selected);
             setDatasetMeta(meta ?? null);
-            cvdAvailable = Boolean(meta?.cvd);
-            cvdDataCache = null;
-            closeCvdModal();
-            updateCvdButtonState();
             loadInterval(currentInterval, currentDataset);
         });
 
@@ -1727,31 +1195,8 @@ def index() -> str:
             });
         }
 
-        if (cvdToggle) {
-            cvdToggle.addEventListener("click", () => {
-                if (!cvdAvailable || !cvdDataCache) return;
-                if (cvdModalVisible) {
-                    closeCvdModal();
-                } else {
-                    openCvdModal();
-                }
-            });
-        }
-
-        if (cvdClose) {
-            cvdClose.addEventListener("click", closeCvdModal);
-        }
-        if (cvdModal) {
-            cvdModal.addEventListener("click", (event) => {
-                if (event.target === cvdModal) {
-                    closeCvdModal();
-                }
-            });
-        }
-
         setActiveIntervalButton(currentInterval);
         updateVolumeButton();
-        updateCvdButtonState();
         
         const resizeObserver = new ResizeObserver((entries) => {
             for (const entry of entries) {
