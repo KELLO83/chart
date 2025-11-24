@@ -685,6 +685,7 @@ def index() -> str:
         let priceChart, obvChart, rsiChart;
         let candleSeries, volumeSeries, rsiSeries, obvSeries;
         let latestObvData = [];
+        let obvBaselineLine = null;
         let currentChartType = null;
 
         const destroyCharts = () => {
@@ -709,6 +710,7 @@ def index() -> str:
             obvSeries = null;
             obvBaselineLine = null;
             latestObvData = [];
+            obvBaselineLine = null;
             charts.length = 0;
             containerChartMap.clear();
         };
@@ -801,8 +803,8 @@ def index() -> str:
             });
             
             obvSeries = obvChart.addLineSeries({
-                color: "#f5a623",
-                lineWidth: 4,
+                color: "#29b6f6",
+                lineWidth: 3,
                 priceLineVisible: false,
                 lastValueVisible: false,
                 crosshairMarkerVisible: true,
@@ -813,9 +815,26 @@ def index() -> str:
                 },
             });
 
+            if (obvBaselineLine) {
+                obvSeries.removePriceLine(obvBaselineLine);
+            }
+            obvBaselineLine = obvSeries.createPriceLine({
+                price: 0,
+                color: "rgba(255, 255, 255, 0.3)",
+                lineWidth: 1,
+                lineStyle: LightweightCharts.LineStyle.Solid,
+                axisLabelVisible: false,
+            });
+
             obvChart.priceScale("right").applyOptions({
                 mode: LightweightCharts.PriceScaleMode.Normal,
                 autoScale: true,
+                borderColor: "rgba(31, 43, 77, 0.7)",
+                textColor: "#cfd7fd",
+                scaleMargins: {
+                    top: 0.2,
+                    bottom: 0.2,
+                },
             });
 
             const drawLevelLine = (price) =>
@@ -1118,6 +1137,16 @@ def index() -> str:
                 syncVolumeSeries();
                 rsiSeries.setData(data.rsi);
                 obvSeries.setData(data.obv);
+                if (obvBaselineLine) {
+                    obvSeries.removePriceLine(obvBaselineLine);
+                }
+                obvBaselineLine = obvSeries.createPriceLine({
+                    price: 0,
+                    color: "rgba(255, 255, 255, 0.3)",
+                    lineWidth: 1,
+                    lineStyle: LightweightCharts.LineStyle.Solid,
+                    axisLabelVisible: false,
+                });
                 const range = obvChart.timeScale().getVisibleLogicalRange();
                 applyObvScale(range);
                 applyObvScale(data.obv);
