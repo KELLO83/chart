@@ -684,6 +684,7 @@ def index() -> str:
 
         let priceChart, obvChart, rsiChart;
         let candleSeries, volumeSeries, rsiSeries, obvSeries;
+        let latestObvData = [];
         let currentChartType = null;
 
         const destroyCharts = () => {
@@ -706,6 +707,8 @@ def index() -> str:
             volumeSeries = null;
             rsiSeries = null;
             obvSeries = null;
+            obvBaselineLine = null;
+            latestObvData = [];
             charts.length = 0;
             containerChartMap.clear();
         };
@@ -830,6 +833,12 @@ def index() -> str:
             registerChart(priceChart);
             registerChart(obvChart);
             registerChart(rsiChart);
+            obvChart
+                .timeScale()
+                .subscribeVisibleLogicalRangeChange((range) => {
+                    if (!range) return;
+                    applyObvScale(range);
+                });
             
             observeChartContainer(priceContainer, priceChart);
             observeChartContainer(obvContainer, obvChart);
@@ -980,6 +989,55 @@ def index() -> str:
                 : "--";
         };
 
+        const applyObvScale = (visibleRange = null) => {
+            if (!obvSeries || !obvChart || !Array.isArray(latestObvData) || !latestObvData.length) {
+                return;
+            }
+
+            let startIndex = 0;
+            let endIndex = latestObvData.length - 1;
+            if (
+                visibleRange &&
+                Number.isFinite(visibleRange.from) &&
+                Number.isFinite(visibleRange.to)
+            ) {
+                startIndex = Math.max(0, Math.floor(visibleRange.from));
+                endIndex = Math.min(latestObvData.length - 1, Math.ceil(visibleRange.to));
+            }
+            if (startIndex > endIndex) return;
+
+            const segment = latestObvData.slice(startIndex, endIndex + 1);
+            const values = segment
+                .map((point) => point.value)
+                .filter((value) => Number.isFinite(value));
+            if (!values.length) return;
+
+            const minValue = Math.min(...values);
+            const maxValue = Math.max(...values);
+            const span = Math.max(Math.abs(maxValue - minValue), 1);
+            const padding = span * 0.1;
+            const priceRange = {
+                minValue: minValue - padding,
+                maxValue: maxValue + padding,
+            };
+
+            obvSeries.applyOptions({
+                autoscaleInfoProvider: () => ({ priceRange }),
+            });
+
+            obvChart.priceScale("right").applyOptions({
+                autoScale: true,
+                scaleMargins: {
+                    top: 0.2,
+                    bottom: 0.2,
+                },
+            });
+            const priceScaleApi = obvChart.priceScale("right");
+            if (priceScaleApi && typeof priceScaleApi.resetAutoScale === "function") {
+                priceScaleApi.resetAutoScale();
+            }
+        };
+
         const charts = [];
         const subscribeChart = (chart) => {
             chart
@@ -1050,6 +1108,7 @@ def index() -> str:
                 candleSeries.setData(data.candles);
                 latestVolumeData = data.volumes;
                 latestCandles = data.candles;
+                latestObvData = data.obv || [];
                 candleMap = buildDataMap(data.candles);
                 volumeMap = buildDataMap(data.volumes);
                 rsiMap = buildDataMap(data.rsi);
@@ -1059,6 +1118,9 @@ def index() -> str:
                 syncVolumeSeries();
                 rsiSeries.setData(data.rsi);
                 obvSeries.setData(data.obv);
+                const range = obvChart.timeScale().getVisibleLogicalRange();
+                applyObvScale(range);
+                applyObvScale(data.obv);
                 priceChart.timeScale().fitContent();
                 const syncedRange = priceChart.timeScale().getVisibleLogicalRange();
                 syncRanges(priceChart, syncedRange);
