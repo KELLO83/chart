@@ -405,15 +405,6 @@ def index() -> str:
             flex: 1.8;
             padding-bottom: 0.35rem;
         }
-        .chart-panel.time-axis {
-            flex: 0 0 38px;
-            min-height: 38px;
-            background: #05070f;
-            border-top: none;
-            border-radius: 0 0 10px 10px;
-            padding: 0;
-            box-shadow: inset 0 10px 20px rgba(0, 0, 0, 0.35);
-        }
         .chart-surface {
             width: 100%;
             height: 100%;
@@ -535,14 +526,12 @@ def index() -> str:
         </div>
         <div id="obv-chart" class="chart-panel obv"></div>
         <div id="rsi-chart" class="chart-panel rsi"></div>
-        <div id="time-axis-chart" class="chart-panel time-axis"></div>
     </div>
 </main>
     <script>
         const priceContainer = document.getElementById("price-chart");
         const rsiContainer = document.getElementById("rsi-chart");
         const obvContainer = document.getElementById("obv-chart");
-        const timeAxisContainer = document.getElementById("time-axis-chart");
         const datasetSelect = document.getElementById("dataset-select");
         const datasetMeta = document.getElementById("dataset-meta");
         const intervalButtons = document.querySelectorAll(
@@ -566,6 +555,7 @@ def index() -> str:
         let latestVolumeData = [];
         let latestCandles = [];
         let isVolumeVisible = true;
+        const RECENT_CAPTURE_COUNT = 120;
         let candleMap = new Map();
         let volumeMap = new Map();
         let rsiMap = new Map();
@@ -640,8 +630,8 @@ def index() -> str:
                 fontFamily: "Inter, Pretendard, sans-serif",
             },
             grid: {
-                vertLines: { color: "rgba(30, 36, 54, 0.6)" },
-                horzLines: { color: "rgba(30, 36, 54, 0.4)" },
+                vertLines: { color: "rgba(0, 0, 0, 0)" },
+                horzLines: { color: "rgba(0, 0, 0, 0)" },
             },
             crosshair: {
                 mode: LightweightCharts.CrosshairMode.Normal,
@@ -683,15 +673,15 @@ def index() -> str:
                 ...overrides,
             });
 
-        let priceChart, obvChart, rsiChart, timeAxisChart;
-        let candleSeries, volumeSeries, rsiSeries, obvSeries, timeAxisSeries;
+        let priceChart, obvChart, rsiChart;
+        let candleSeries, volumeSeries, rsiSeries, obvSeries;
         let currentChartType = null;
 
         const destroyCharts = () => {
             if (resizeObserverInstance) {
                 resizeObserverInstance.disconnect();
             }
-            [priceChart, obvChart, rsiChart, timeAxisChart].forEach((chart) => {
+            [priceChart, obvChart, rsiChart].forEach((chart) => {
                 if (chart) {
                     chart.remove();
                 }
@@ -699,17 +689,14 @@ def index() -> str:
             priceContainer.innerHTML = "";
             obvContainer.innerHTML = "";
             rsiContainer.innerHTML = "";
-            if (timeAxisContainer) timeAxisContainer.innerHTML = "";
             
             priceChart = null;
             obvChart = null;
             rsiChart = null;
-            timeAxisChart = null;
             candleSeries = null;
             volumeSeries = null;
             rsiSeries = null;
             obvSeries = null;
-            timeAxisSeries = null;
             charts.length = 0;
             containerChartMap.clear();
         };
@@ -718,75 +705,28 @@ def index() -> str:
             priceChart = createChart(priceContainer);
             obvChart = createChart(obvContainer, {
                 grid: {
-                    vertLines: { color: "rgba(30, 36, 54, 0.45)" },
-                    horzLines: { color: "rgba(30, 36, 54, 0.3)" },
+                    vertLines: { color: "rgba(0, 0, 0, 0)" },
+                    horzLines: { color: "rgba(0, 0, 0, 0)" },
                 },
             });
             rsiChart = createChart(rsiContainer, {
                 grid: {
-                    vertLines: { color: "rgba(30, 36, 54, 0.45)" },
-                    horzLines: { color: "rgba(30, 36, 54, 0.3)" },
+                    vertLines: { color: "rgba(0, 0, 0, 0)" },
+                    horzLines: { color: "rgba(0, 0, 0, 0)" },
                 },
             });
-            timeAxisChart = timeAxisContainer
-                ? createChart(timeAxisContainer, {
-                      layout: {
-                          background: { color: "rgba(0, 0, 0, 0)" },
-                          textColor: "#dfe4ff",
-                          fontFamily:
-                              '"JetBrains Mono", "Roboto Mono", "Inter", sans-serif',
-                          fontSize: 11,
-                      },
-                      grid: {
-                          vertLines: { color: "rgba(0, 0, 0, 0)" },
-                          horzLines: { color: "rgba(0, 0, 0, 0)" },
-                      },
-                      crosshair: {
-                          mode: LightweightCharts.CrosshairMode.Hidden,
-                      },
-                      handleScroll: false,
-                      handleScale: false,
-                      leftPriceScale: { visible: false },
-                      rightPriceScale: { visible: false },
-                      timeScale: {
-                          borderColor: "rgba(31, 43, 77, 0.6)",
-                          textColor: "#dfe4ff",
-                          lockVisibleTimeRangeOnResize: true,
-                          ticksVisible: true,
-                          timeVisible: false,
-                          secondsVisible: false,
-                          rightOffset: 8,
-                          tickMarkFormatter: formatKoreanTick,
-                      },
-                  })
-                : null;
-            
-            timeAxisSeries = timeAxisChart
-                ? timeAxisChart.addLineSeries({
-                      color: "rgba(0,0,0,0)",
-                      lineWidth: 0,
-                      priceLineVisible: false,
-                      lastValueVisible: false,
-                      crosshairMarkerVisible: false,
-                  })
-                : null;
-
             hideTimeAxis(priceChart);
             hideTimeAxis(obvChart);
             showTimeAxis(rsiChart);
-            
-            if (timeAxisChart) {
-                timeAxisChart.priceScale("right").applyOptions({
-                    visible: false,
-                });
-                timeAxisChart.timeScale().applyOptions({
-                    visible: true,
-                    borderColor: "rgba(31, 43, 77, 0.6)",
-                    textColor: "#cfd7fd",
-                    lockVisibleTimeRangeOnResize: true,
-                    tickMarkFormatter: formatKoreanTick,
-                });
-            }
+            rsiChart.timeScale().applyOptions({
+                borderColor: "rgba(31, 43, 77, 0.6)",
+                textColor: "#cfd7fd",
+                lockVisibleTimeRangeOnResize: true,
+                tickMarkFormatter: formatKoreanTick,
+                timeVisible: false,
+                secondsVisible: false,
+                ticksVisible: true,
+            });
 
             priceChart.priceScale("right").applyOptions({
                 textColor: "#ffffff",
@@ -841,8 +781,8 @@ def index() -> str:
             });
 
             rsiSeries = rsiChart.addLineSeries({
-                color: "#9b59b6",
-                lineWidth: 2,
+                color: "#ffffff",
+                lineWidth: 3,
                 priceLineVisible: false,
                 lastValueVisible: false,
                 crosshairMarkerVisible: true,
@@ -850,7 +790,7 @@ def index() -> str:
             
             obvSeries = obvChart.addLineSeries({
                 color: "#f5a623",
-                lineWidth: 3,
+                lineWidth: 4,
                 priceLineVisible: false,
                 lastValueVisible: false,
                 crosshairMarkerVisible: true,
@@ -881,12 +821,10 @@ def index() -> str:
             registerChart(priceChart);
             registerChart(obvChart);
             registerChart(rsiChart);
-            if (timeAxisChart) registerChart(timeAxisChart);
             
             observeChartContainer(priceContainer, priceChart);
             observeChartContainer(obvContainer, obvChart);
             observeChartContainer(rsiContainer, rsiChart);
-            if (timeAxisContainer) observeChartContainer(timeAxisContainer, timeAxisChart);
 
             priceChart.subscribeCrosshairMove((param) => {
                 if (!param || !param.time) {
@@ -921,12 +859,8 @@ def index() -> str:
         hideTimeAxis(priceChart);
         hideTimeAxis(obvChart);
         showTimeAxis(rsiChart);
-        if (timeAxisChart) {
-            timeAxisChart.priceScale("right").applyOptions({
-                visible: false,
-            });
-            timeAxisChart.timeScale().applyOptions({
-                visible: true,
+        if (rsiChart) {
+            rsiChart.timeScale().applyOptions({
                 borderColor: "rgba(31, 43, 77, 0.6)",
                 textColor: "#cfd7fd",
                 lockVisibleTimeRangeOnResize: true,
@@ -1105,14 +1039,6 @@ def index() -> str:
                 }
 
                 candleSeries.setData(data.candles);
-                if (timeAxisSeries) {
-                    timeAxisSeries.setData(
-                        data.candles.map((point) => ({
-                            time: point.time,
-                            value: 0,
-                        }))
-                    );
-                }
                 latestVolumeData = data.volumes;
                 latestCandles = data.candles;
                 candleMap = buildDataMap(data.candles);
@@ -1177,7 +1103,7 @@ def index() -> str:
 
             const gatherScreenshots = () => {
                 const shots = [];
-                [priceChart, obvChart, rsiChart, timeAxisChart].forEach(
+                [priceChart, obvChart, rsiChart].forEach(
                     (chart) => {
                         const canvas = captureChartCanvas(chart);
                         if (canvas) shots.push(canvas);
@@ -1203,18 +1129,19 @@ def index() -> str:
                 return merged;
             };
 
-            const segments = gatherScreenshots();
-            if (!segments.length) {
-                alert("차트를 아직 불러오고 있습니다. 잠시 후 다시 시도해 주세요.");
-                return;
-            }
-
             let restoreRange = null;
             try {
                 if (options?.recentCandles) {
                     restoreRange = await focusRecentCandles(
                         options.recentCandles
                     );
+                }
+                const segments = gatherScreenshots();
+                if (!segments.length) {
+                    alert(
+                        "차트를 아직 불러오고 있습니다. 잠시 후 다시 시도해 주세요."
+                    );
+                    return;
                 }
                 const canvas = composeStackedCanvas(segments);
                 if (!canvas) throw new Error("스크린샷 생성에 실패했습니다.");
@@ -1340,7 +1267,9 @@ def index() -> str:
                 event.shiftKey
             ) {
                 event.preventDefault();
-                copyChartScreenshotToClipboard({ recentCandles: 120 });
+                copyChartScreenshotToClipboard({
+                    recentCandles: RECENT_CAPTURE_COUNT,
+                });
             }
         });
     </script>

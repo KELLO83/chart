@@ -45,3 +45,12 @@
 1.  새로운 UI 요소를 구현할 때는 항상 **"트레이딩뷰 캡처 화면"**과 비교하여 색상, 간격, 위치를 조정하라.
 2.  데이터가 업데이트될 때(Real-time), 전체 차트를 다시 그리기보다 변경된 부분만 효율적으로 업데이트하는 전략(Dirty Rect 등)을 고려하라.
 3.  코드를 작성하기 전, 해당 기능이 트레이딩뷰에서 어떻게 동작하는지 먼저 분석하고 그 로직을 주석으로 설명한 뒤 구현하라.
+
+
+# Lightweight Charts API Reference(공식문서 참조)
+TradingView Lightweight Charts v4 공식 마이그레이션 문서: https://github.com/tradingview/lightweight-charts/blob/master/website/docs/migrations/from-v3-to-v4.md
+Lightweight Charts API `createChart`: https://tradingview.github.io/lightweight-charts/docs/api/functions/createChart  
+Lightweight Charts API `IChartApi.removeSeries`: https://tradingview.github.io/lightweight-charts/docs/api/interfaces/IChartApi/#removeseries  
+Lightweight Charts API `IPriceScaleApi.subscribePriceRangeChange`: https://tradingview.github.io/lightweight-charts/docs/api/interfaces/IPriceScaleApi/#subscribepricerangechange  
+Lightweight Charts API `ITimeScaleApi.subscribeSizeChange`: https://github.com/tradingview/lightweight-charts/blob/master/website/docs/api/interfaces/ITimeScaleApi.md#subscribesizechange  
+Lightweight Charts Canvas Rendering Target 문서: https://github.com/tradingview/lightweight-charts/blob/master/website/docs/plugins/canvas-rendering-target.md
