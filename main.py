@@ -256,11 +256,18 @@ def index() -> str:
         :root {
             color-scheme: dark;
         }
+        html, body {
+            height: 100%;
+        }
         body {
             margin: 0;
             font-family: "Pretendard", "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
             background-color: #000000;
             color: #c7cfde;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            overflow: hidden;
         }
         body.modal-open {
             overflow: hidden;
@@ -376,14 +383,16 @@ def index() -> str:
             cursor: default;
         }
         main {
-            height: calc(100vh - 86px);
+            flex: 1;
             padding: 0 1.5rem 1.5rem;
+            min-height: 0;
         }
         .chart-stack {
             display: flex;
             flex-direction: column;
             gap: 0.65rem;
             height: 100%;
+            min-height: 0;
         }
         .chart-panel {
             flex: 1;
