@@ -17,7 +17,7 @@ UP_COLOR = "#089981"
 DOWN_COLOR = "#f23645"
 UP_VOLUME_COLOR = "rgba(8, 153, 129, 0.4)"
 DOWN_VOLUME_COLOR = "rgba(242, 54, 69, 0.4)"
-OBV_COLOR = "#f5a623"
+OBV_COLOR = "#008080"  # teal tone for OBV line
 ALLOWED_INTERVAL_RULES = {
     "1d": "1D",
     "3d": "3D",
