@@ -24,8 +24,9 @@ def compute_obv(close: pd.Series, volume: pd.Series) -> pd.Series:
     if data.empty:
         return pd.Series(dtype="float64")
 
+    # TradingView-style OBV starts at 0 and accumulates thereafter.
     obv = pd.Series(index=data.index, dtype="float64")
-    obv.iloc[0] = float(data["volume"].iloc[0])
+    obv.iloc[0] = 0.0
 
     for idx in range(1, len(data)):
         prev_obv = obv.iloc[idx - 1]
