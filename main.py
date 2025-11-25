@@ -485,8 +485,45 @@ def index() -> str:
             top: 0.4rem;
             left: 0.55rem;
             display: flex;
-            gap: 0.4rem;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.35rem;
             z-index: 5;
+        }
+        .chart-toolbar-buttons {
+            display: flex;
+            gap: 0.35rem;
+        }
+        .chart-toolbar .pill-button {
+            min-width: 120px;
+            justify-content: center;
+            display: inline-flex;
+        }
+        .ticker-stats {
+            display: inline-flex;
+            gap: 0.5rem;
+            align-items: center;
+            background: rgba(7, 10, 18, 0.7);
+            padding: 0.35rem 0.85rem;
+            border-radius: 999px;
+            border: 1px solid rgba(34, 45, 72, 0.65);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+            font-size: 0.8rem;
+        }
+        .ticker-stats .ticker-name {
+            font-weight: 600;
+            color: #f5f7ff;
+            letter-spacing: 0.04em;
+        }
+        .ticker-stats .stat-item {
+            display: inline-flex;
+            gap: 0.25rem;
+            color: #cdd4f7;
+        }
+        .ticker-stats .stat-label {
+            color: #8690b4;
+            font-weight: 600;
+            letter-spacing: 0.04em;
         }
         .status-bar {
             display: flex;
@@ -591,8 +628,17 @@ def index() -> str:
         <div class="chart-stack">
             <div class="chart-panel price" data-panel-id="price" data-min-height="180">
                 <div class="chart-toolbar">
-                    <button type="button" id="volume-toggle" class="pill-button active">거래량 표시</button>
-                    <button type="button" id="rsi-toggle" class="pill-button active">RSI 숨기기</button>
+                    <div class="ticker-stats" aria-live="polite">
+                        <span class="ticker-name" id="ticker-name">--</span>
+                        <span class="stat-item"><span class="stat-label">O</span><span id="ticker-open">--</span></span>
+                        <span class="stat-item"><span class="stat-label">H</span><span id="ticker-high">--</span></span>
+                        <span class="stat-item"><span class="stat-label">L</span><span id="ticker-low">--</span></span>
+                        <span class="stat-item"><span class="stat-label">C</span><span id="ticker-close">--</span></span>
+                    </div>
+                    <div class="chart-toolbar-buttons">
+                        <button type="button" id="volume-toggle" class="pill-button active">거래량 표시</button>
+                        <button type="button" id="rsi-toggle" class="pill-button active">RSI 숨기기</button>
+                    </div>
                 </div>
                 <div id="price-chart" class="chart-surface"></div>
                 <div id="cursor-date-label" class="cursor-date-label" aria-hidden="true"></div>
@@ -634,6 +680,11 @@ def index() -> str:
         const statusVolume = document.getElementById("status-volume");
         const statusRsi = document.getElementById("status-rsi");
         const statusObv = document.getElementById("status-obv");
+        const tickerName = document.getElementById("ticker-name");
+        const tickerOpen = document.getElementById("ticker-open");
+        const tickerHigh = document.getElementById("ticker-high");
+        const tickerLow = document.getElementById("ticker-low");
+        const tickerClose = document.getElementById("ticker-close");
         const cursorDateLabel = document.getElementById("cursor-date-label");
         const MIN_PANEL_HEIGHT = 120;
         const PANEL_FLEX_KEY = "chartPanelFlexState";
@@ -1279,6 +1330,7 @@ def index() -> str:
         datasetMeta.textContent = `${info.label} · ${info.range} · ${info.rows}건`;
         statusSymbol.textContent = info.label;
         statusRange.textContent = info.range;
+        if (tickerName) tickerName.textContent = info.label;
     };
 
         const updateVolumeButton = () => {
@@ -1339,6 +1391,10 @@ def index() -> str:
             statusObv.textContent = obvPoint
                 ? formatVolumeValue(obvPoint.value)
                 : "--";
+            if (tickerOpen) tickerOpen.textContent = candle ? formatNumber(candle.open) : "--";
+            if (tickerHigh) tickerHigh.textContent = candle ? formatNumber(candle.high) : "--";
+            if (tickerLow) tickerLow.textContent = candle ? formatNumber(candle.low) : "--";
+            if (tickerClose) tickerClose.textContent = candle ? formatNumber(candle.close) : "--";
         };
 
         const applyObvScale = (visibleRange = null) => {
