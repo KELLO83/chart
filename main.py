@@ -414,6 +414,28 @@ def index() -> str:
             flex-grow: 1.8;
             padding-bottom: 0.35rem;
         }
+        .cursor-date-label {
+            position: absolute;
+            bottom: 6px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 0.2rem 0.65rem;
+            border-radius: 6px;
+            border: 1px solid rgba(34, 44, 70, 0.9);
+            background: rgba(9, 13, 26, 0.92);
+            color: #e6edff;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.55);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+            z-index: 10;
+        }
+        .cursor-date-label[aria-hidden="false"] {
+            opacity: 1;
+        }
         .panel-resizer {
             height: 14px;
             border-radius: 999px;
@@ -560,6 +582,7 @@ def index() -> str:
                     <button type="button" id="volume-toggle" class="pill-button active">거래량 표시</button>
                 </div>
                 <div id="price-chart" class="chart-surface"></div>
+                <div id="cursor-date-label" class="cursor-date-label" aria-hidden="true"></div>
             </div>
             <div class="panel-resizer" role="separator" aria-label="OBV 패널 크기 조절" aria-orientation="horizontal"></div>
             <div class="chart-panel obv" data-panel-id="obv" data-min-height="120">
@@ -591,6 +614,7 @@ def index() -> str:
         const statusVolume = document.getElementById("status-volume");
         const statusRsi = document.getElementById("status-rsi");
         const statusObv = document.getElementById("status-obv");
+        const cursorDateLabel = document.getElementById("cursor-date-label");
         const MIN_PANEL_HEIGHT = 120;
         const PANEL_FLEX_KEY = "chartPanelFlexState";
         const defaultPanelFlex = {
@@ -623,6 +647,44 @@ def index() -> str:
             if (resizeObserverInstance) {
                 resizeObserverInstance.observe(container);
             }
+        };
+
+        const hideCursorDateLabel = () => {
+            if (!cursorDateLabel) return;
+            cursorDateLabel.setAttribute("aria-hidden", "true");
+        };
+
+        const formatCursorDateText = (time) => {
+            const date = businessDayToDate(time);
+            if (!date) return "";
+            const year = date.getUTCFullYear();
+            const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+            const day = String(date.getUTCDate()).padStart(2, "0");
+            return `${year}-${month}-${day}`;
+        };
+
+        const updateCursorDateLabel = (param) => {
+            if (!cursorDateLabel || !priceContainer) return;
+            if (!param || !param.time || !param.point) {
+                hideCursorDateLabel();
+                return;
+            }
+            const labelText = formatCursorDateText(param.time);
+            if (!labelText) {
+                hideCursorDateLabel();
+                return;
+            }
+            cursorDateLabel.textContent = labelText;
+            cursorDateLabel.setAttribute("aria-hidden", "false");
+            const containerWidth = priceContainer.clientWidth;
+            const halfWidth = (cursorDateLabel.offsetWidth || 0) / 2;
+            const padding = 12;
+            let targetX = param.point.x;
+            const minX = padding + halfWidth;
+            const maxX = containerWidth - halfWidth - padding;
+            if (targetX < minX) targetX = minX;
+            if (targetX > maxX) targetX = maxX;
+            cursorDateLabel.style.left = `${targetX}px`;
         };
 
         const applySavedPanelFlexState = () => {
@@ -865,6 +927,7 @@ def index() -> str:
             obvBaselineLine = null;
             charts.length = 0;
             containerChartMap.clear();
+            hideCursorDateLabel();
         };
 
         const initializeCharts = () => {
@@ -1015,13 +1078,18 @@ def index() -> str:
             observeChartContainer(obvContainer, obvChart);
             observeChartContainer(rsiContainer, rsiChart);
 
-            priceChart.subscribeCrosshairMove((param) => {
+            const handleCrosshairMove = (param) => {
                 if (!param || !param.time) {
                     updateStatusBar(null);
+                    hideCursorDateLabel();
                     return;
                 }
                 const key = createTimeKey(param.time);
                 updateStatusBar(key);
+                updateCursorDateLabel(param);
+            };
+            [priceChart, obvChart, rsiChart].forEach((chart) => {
+                chart?.subscribeCrosshairMove(handleCrosshairMove);
             });
         };
 
