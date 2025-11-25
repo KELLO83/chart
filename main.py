@@ -386,13 +386,23 @@ def index() -> str:
             flex: 1;
             padding: 0 1.5rem 1.5rem;
             min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
         }
         .chart-stack {
             display: flex;
             flex-direction: column;
             gap: 0.45rem;
-            height: 100%;
+            flex: 1;
             min-height: 0;
+        }
+        .time-axis-container {
+            flex: 0 0 46px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(5, 8, 15, 0.95);
+            border-radius: 8px;
+            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.45);
         }
         .chart-panel {
             flex: 1 1 0%;
@@ -596,6 +606,9 @@ def index() -> str:
                 <div id="rsi-chart" class="chart-surface"></div>
             </div>
         </div>
+        <div class="time-axis-container">
+            <div id="time-axis-chart" class="chart-surface"></div>
+        </div>
     </main>
     <script>
         const priceContainer = document.getElementById("price-chart");
@@ -603,6 +616,7 @@ def index() -> str:
         const obvContainer = document.getElementById("obv-chart");
         const rsiPanel = document.querySelector(".chart-panel.rsi");
         const rsiResizer = document.querySelector('[data-resizer-id="rsi"]');
+        const timeAxisContainer = document.getElementById("time-axis-chart");
         const datasetSelect = document.getElementById("dataset-select");
         const datasetMeta = document.getElementById("dataset-meta");
         const intervalButtons = document.querySelectorAll(
@@ -965,8 +979,8 @@ def index() -> str:
                 ...overrides,
             });
 
-        let priceChart, obvChart, rsiChart;
-        let candleSeries, volumeSeries, rsiSeries, obvSeries;
+        let priceChart, obvChart, rsiChart, timeAxisChart;
+        let candleSeries, volumeSeries, rsiSeries, obvSeries, timeAxisSeries;
         let latestObvData = [];
         let obvBaselineLine = null;
         let currentChartType = null;
@@ -975,7 +989,7 @@ def index() -> str:
             if (resizeObserverInstance) {
                 resizeObserverInstance.disconnect();
             }
-            [priceChart, obvChart, rsiChart].forEach((chart) => {
+            [priceChart, obvChart, rsiChart, timeAxisChart].forEach((chart) => {
                 if (chart) {
                     chart.remove();
                 }
@@ -983,14 +997,17 @@ def index() -> str:
             priceContainer.innerHTML = "";
             obvContainer.innerHTML = "";
             rsiContainer.innerHTML = "";
+            timeAxisContainer.innerHTML = "";
             
             priceChart = null;
             obvChart = null;
             rsiChart = null;
+            timeAxisChart = null;
             candleSeries = null;
             volumeSeries = null;
             rsiSeries = null;
             obvSeries = null;
+            timeAxisSeries = null;
             obvBaselineLine = null;
             latestObvData = [];
             obvBaselineLine = null;
@@ -1013,18 +1030,39 @@ def index() -> str:
                     horzLines: { color: "rgba(0, 0, 0, 0)" },
                 },
             });
+            timeAxisChart = createChart(timeAxisContainer);
             hideTimeAxis(priceChart);
             hideTimeAxis(obvChart);
-            showTimeAxis(rsiChart);
-            rsiChart.timeScale().applyOptions({
+            hideTimeAxis(rsiChart);
+            showTimeAxis(timeAxisChart);
+            timeAxisChart.timeScale().applyOptions({
                 borderColor: "rgba(31, 43, 77, 0.6)",
                 textColor: "#cfd7fd",
                 lockVisibleTimeRangeOnResize: true,
                 tickMarkFormatter: formatKoreanTick,
-                timeVisible: false,
+                timeVisible: true,
                 secondsVisible: false,
                 ticksVisible: true,
             });
+            timeAxisChart.priceScale("right").applyOptions({ visible: false });
+            timeAxisChart.priceScale("left").applyOptions({ visible: false });
+            timeAxisSeries = timeAxisChart.addLineSeries({
+                color: "rgba(0,0,0,0)",
+                lineWidth: 1,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+            });
+            timeAxisChart
+                .timeScale()
+                .subscribeVisibleLogicalRangeChange((range) => {
+                    if (!range || syncing) return;
+                    syncing = true;
+                    charts.forEach((chart) => {
+                        chart?.timeScale().setVisibleLogicalRange(range);
+                    });
+                    syncing = false;
+                });
 
             priceChart.priceScale("right").applyOptions({
                 textColor: "#ffffff",
@@ -1033,18 +1071,18 @@ def index() -> str:
                     bottom: 0.05,
                 },
             });
-            rsiChart.priceScale("right").applyOptions({
-                textColor: "#ffffff",
-                scaleMargins: {
-                    top: 0.2,
-                    bottom: 0.2,
-                },
-            });
             obvChart.priceScale("right").applyOptions({
                 textColor: "#ffffff",
                 scaleMargins: {
                     top: 0.04,
                     bottom: 0.04,
+                },
+            });
+            rsiChart.priceScale("right").applyOptions({
+                textColor: "#ffffff",
+                scaleMargins: {
+                    top: 0.2,
+                    bottom: 0.2,
                 },
             });
 
@@ -1070,6 +1108,7 @@ def index() -> str:
                     bottom: 0,
                 },
             });
+
             priceChart.priceScale("left").applyOptions({
                 visible: false,
                 scaleMargins: {
@@ -1146,6 +1185,7 @@ def index() -> str:
             observeChartContainer(priceContainer, priceChart);
             observeChartContainer(obvContainer, obvChart);
             observeChartContainer(rsiContainer, rsiChart);
+            observeChartContainer(timeAxisContainer, timeAxisChart);
             applyRsiVisibilityClasses();
 
             const handleCrosshairMove = (param) => {
@@ -1185,13 +1225,15 @@ def index() -> str:
         };
         hideTimeAxis(priceChart);
         hideTimeAxis(obvChart);
-        showTimeAxis(rsiChart);
-        if (rsiChart) {
-            rsiChart.timeScale().applyOptions({
+        hideTimeAxis(rsiChart);
+        showTimeAxis(timeAxisChart);
+        if (timeAxisChart) {
+            timeAxisChart.timeScale().applyOptions({
                 borderColor: "rgba(31, 43, 77, 0.6)",
                 textColor: "#cfd7fd",
                 lockVisibleTimeRangeOnResize: true,
                 tickMarkFormatter: formatKoreanTick,
+                timeVisible: true,
             });
         }
 
@@ -1364,6 +1406,9 @@ def index() -> str:
                 if (chart === sourceChart) return;
                 chart.timeScale().setVisibleLogicalRange(range);
             });
+            if (timeAxisChart && sourceChart !== timeAxisChart) {
+                timeAxisChart.timeScale().setVisibleLogicalRange(range);
+            }
             syncing = false;
         };
 
@@ -1431,6 +1476,14 @@ def index() -> str:
                     rsiSeries.setData(latestRsiData);
                 }
                 obvSeries.setData(data.obv);
+                if (timeAxisSeries && latestCandles.length) {
+                    timeAxisSeries.setData(
+                        latestCandles.map((point) => ({
+                            time: point.time,
+                            value: 0,
+                        }))
+                    );
+                }
                 if (obvBaselineLine) {
                     obvSeries.removePriceLine(obvBaselineLine);
                 }
@@ -1497,7 +1550,7 @@ def index() -> str:
 
             const gatherScreenshots = () => {
                 const shots = [];
-                [priceChart, obvChart, rsiChart].forEach((chart) => {
+                [priceChart, obvChart, rsiChart, timeAxisChart].forEach((chart) => {
                     if (!chart) return;
                     if (!isRsiVisible && chart === rsiChart) return;
                     const canvas = captureChartCanvas(chart);
