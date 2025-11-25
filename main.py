@@ -974,8 +974,8 @@ def index() -> str:
             obvChart.priceScale("right").applyOptions({
                 textColor: "#ffffff",
                 scaleMargins: {
-                    top: 0.2,
-                    bottom: 0.2,
+                    top: 0.04,
+                    bottom: 0.04,
                 },
             });
 
@@ -1047,8 +1047,8 @@ def index() -> str:
                 borderColor: "rgba(31, 43, 77, 0.7)",
                 textColor: "#cfd7fd",
                 scaleMargins: {
-                    top: 0.2,
-                    bottom: 0.2,
+                    top: 0.04,
+                    bottom: 0.04,
                 },
             });
 
@@ -1254,7 +1254,7 @@ def index() -> str:
             const minValue = Math.min(...values);
             const maxValue = Math.max(...values);
             const span = Math.max(Math.abs(maxValue - minValue), 1);
-            const padding = span * 0.1;
+            const padding = span * 0.02;
             const priceRange = {
                 minValue: minValue - padding,
                 maxValue: maxValue + padding,
@@ -1267,8 +1267,8 @@ def index() -> str:
             obvChart.priceScale("right").applyOptions({
                 autoScale: true,
                 scaleMargins: {
-                    top: 0.2,
-                    bottom: 0.2,
+                    top: 0.04,
+                    bottom: 0.04,
                 },
             });
             const priceScaleApi = obvChart.priceScale("right");
