@@ -437,28 +437,27 @@ def index() -> str:
             opacity: 1;
         }
         .panel-resizer {
-            height: 14px;
-            border-radius: 999px;
-            border: 1px solid rgba(22, 26, 40, 0.95);
-            background: radial-gradient(circle, rgba(25, 35, 64, 0.7), rgba(8, 10, 22, 0.95));
-            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.7);
+            height: 2px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 0;
             cursor: row-resize;
-            display: flex;
-            align-items: center;
-            justify-content: center;
             user-select: none;
             touch-action: none;
+            position: relative;
+            transition: background 0.2s ease;
         }
         .panel-resizer::before {
             content: "";
-            width: 80px;
-            height: 3px;
-            border-radius: 999px;
-            background: linear-gradient(90deg, rgba(73, 129, 255, 0.3), rgba(66, 220, 255, 0.6), rgba(73, 129, 255, 0.3));
-            box-shadow: 0 0 8px rgba(66, 220, 255, 0.35);
+            position: absolute;
+            inset: 0;
+            background: rgba(255, 255, 255, 0.6);
+            opacity: 0;
+            transition: opacity 0.15s ease;
         }
-        .panel-resizer.dragging {
-            background: linear-gradient(120deg, rgba(20, 28, 52, 0.95), rgba(10, 14, 28, 0.95));
+        .panel-resizer:hover::before,
+        .panel-resizer.dragging::before {
+            opacity: 1;
         }
         body.panel-resize-active {
             user-select: none;
