@@ -36,7 +36,16 @@ def load_price_data(csv_path: Path) -> pd.DataFrame:
     data[numeric_cols] = data[numeric_cols].apply(
         pd.to_numeric, errors="coerce"
     )
-    return data.dropna(subset=numeric_cols)
+    cleaned = data.dropna(subset=numeric_cols)
+    # filter out rows where prices or volume are obviously invalid (all zeros etc.)
+    invalid_prices = (
+        (cleaned["open"] == 0)
+        & (cleaned["high"] == 0)
+        & (cleaned["low"] == 0)
+    )
+    invalid_volume = cleaned["volume"] == 0
+    cleaned = cleaned[~(invalid_prices | invalid_volume)]
+    return cleaned
 
 
 def get_dataset_catalog() -> Dict[str, Path]:

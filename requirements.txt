@@ -5,3 +5,8 @@ jinja2
 aiofiles
 python-multipart
 openpyxl
+
+
+
+streamlit
+TA-Lib
