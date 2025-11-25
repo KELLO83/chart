@@ -414,6 +414,9 @@ def index() -> str:
             flex-grow: 1.8;
             padding-bottom: 0.35rem;
         }
+        .panel-hidden {
+            display: none !important;
+        }
         .cursor-date-label {
             position: absolute;
             bottom: 6px;
@@ -579,6 +582,7 @@ def index() -> str:
             <div class="chart-panel price" data-panel-id="price" data-min-height="180">
                 <div class="chart-toolbar">
                     <button type="button" id="volume-toggle" class="pill-button active">거래량 표시</button>
+                    <button type="button" id="rsi-toggle" class="pill-button active">RSI 숨기기</button>
                 </div>
                 <div id="price-chart" class="chart-surface"></div>
                 <div id="cursor-date-label" class="cursor-date-label" aria-hidden="true"></div>
@@ -587,7 +591,7 @@ def index() -> str:
             <div class="chart-panel obv" data-panel-id="obv" data-min-height="120">
                 <div id="obv-chart" class="chart-surface"></div>
             </div>
-            <div class="panel-resizer" role="separator" aria-label="RSI 패널 크기 조절" aria-orientation="horizontal"></div>
+            <div class="panel-resizer" role="separator" aria-label="RSI 패널 크기 조절" aria-orientation="horizontal" data-resizer-id="rsi"></div>
             <div class="chart-panel rsi" data-panel-id="rsi" data-min-height="120">
                 <div id="rsi-chart" class="chart-surface"></div>
             </div>
@@ -597,12 +601,15 @@ def index() -> str:
         const priceContainer = document.getElementById("price-chart");
         const rsiContainer = document.getElementById("rsi-chart");
         const obvContainer = document.getElementById("obv-chart");
+        const rsiPanel = document.querySelector(".chart-panel.rsi");
+        const rsiResizer = document.querySelector('[data-resizer-id="rsi"]');
         const datasetSelect = document.getElementById("dataset-select");
         const datasetMeta = document.getElementById("dataset-meta");
         const intervalButtons = document.querySelectorAll(
             ".interval-toggle .interval-button"
         );
         const volumeToggle = document.getElementById("volume-toggle");
+        const rsiToggle = document.getElementById("rsi-toggle");
         const statusSymbol = document.getElementById("status-symbol");
         const statusRange = document.getElementById("status-range");
         const statusDate = document.getElementById("status-date");
@@ -621,6 +628,7 @@ def index() -> str:
             obv: 1.8,
             rsi: 1.8,
         };
+        const RSI_VISIBILITY_KEY = "chartRsiVisibility";
         const chartPanels = Array.from(
             document.querySelectorAll(".chart-panel[data-panel-id]")
         );
@@ -630,8 +638,10 @@ def index() -> str:
         let requestCounter = 0;
         let datasetList = [];
         let latestVolumeData = [];
+        let latestRsiData = [];
         let latestCandles = [];
         let isVolumeVisible = true;
+        let isRsiVisible = true;
         const RECENT_CAPTURE_COUNT = 120;
         let candleMap = new Map();
         let volumeMap = new Map();
@@ -640,6 +650,18 @@ def index() -> str:
         let latestTimeKey = null;
         const containerChartMap = new Map();
         let resizeObserverInstance = null;
+        try {
+            if (window?.localStorage) {
+                const storedVisibility =
+                    window.localStorage.getItem(RSI_VISIBILITY_KEY);
+                if (storedVisibility === "hidden") {
+                    isRsiVisible = false;
+                }
+            }
+        } catch (error) {
+            console.warn("RSI 패널 상태를 불러오지 못했습니다.", error);
+        }
+
         const observeChartContainer = (container, chart) => {
             if (!container || !chart) return;
             containerChartMap.set(container, chart);
@@ -648,9 +670,55 @@ def index() -> str:
             }
         };
 
+        const persistRsiVisibility = () => {
+            if (!window?.localStorage) return;
+            try {
+                window.localStorage.setItem(
+                    RSI_VISIBILITY_KEY,
+                    isRsiVisible ? "visible" : "hidden"
+                );
+            } catch (error) {
+                console.warn("RSI 패널 상태를 저장하지 못했습니다.", error);
+            }
+        };
+
         const hideCursorDateLabel = () => {
             if (!cursorDateLabel) return;
             cursorDateLabel.setAttribute("aria-hidden", "true");
+        };
+
+        const updateRsiToggleButton = () => {
+            if (!rsiToggle) return;
+            rsiToggle.textContent = isRsiVisible ? "RSI 숨기기" : "RSI 표시";
+            rsiToggle.classList.toggle("active", isRsiVisible);
+        };
+
+        const applyRsiVisibilityClasses = () => {
+            if (rsiPanel) {
+                rsiPanel.classList.toggle("panel-hidden", !isRsiVisible);
+            }
+            if (rsiResizer) {
+                rsiResizer.classList.toggle("panel-hidden", !isRsiVisible);
+            }
+            updateRsiToggleButton();
+        };
+
+        const setRsiVisibility = (visible) => {
+            const nextState = Boolean(visible);
+            if (isRsiVisible === nextState) return;
+            isRsiVisible = nextState;
+            applyRsiVisibilityClasses();
+            if (!isRsiVisible) {
+                statusRsi.textContent = "--";
+            } else if (latestTimeKey) {
+                updateStatusBar(latestTimeKey);
+                if (rsiChart) {
+                    requestAnimationFrame(() => {
+                        rsiChart.timeScale().fitContent();
+                    });
+                }
+            }
+            persistRsiVisibility();
         };
 
         const formatCursorDateText = (time) => {
@@ -685,6 +753,8 @@ def index() -> str:
             if (targetX > maxX) targetX = maxX;
             cursorDateLabel.style.left = `${targetX}px`;
         };
+
+        applyRsiVisibilityClasses();
 
         const applySavedPanelFlexState = () => {
             if (!window?.localStorage) return;
@@ -1076,6 +1146,7 @@ def index() -> str:
             observeChartContainer(priceContainer, priceChart);
             observeChartContainer(obvContainer, obvChart);
             observeChartContainer(rsiContainer, rsiChart);
+            applyRsiVisibilityClasses();
 
             const handleCrosshairMove = (param) => {
                 if (!param || !param.time) {
@@ -1219,9 +1290,10 @@ def index() -> str:
             statusVolume.textContent = volumePoint
                 ? formatVolumeValue(volumePoint.value)
                 : "--";
-            statusRsi.textContent = rsiPoint
-                ? formatNumber(rsiPoint.value, 2)
-                : "--";
+            statusRsi.textContent =
+                isRsiVisible && rsiPoint
+                    ? formatNumber(rsiPoint.value, 2)
+                    : "--";
             statusObv.textContent = obvPoint
                 ? formatVolumeValue(obvPoint.value)
                 : "--";
@@ -1347,14 +1419,17 @@ def index() -> str:
                 latestVolumeData = data.volumes;
                 latestCandles = data.candles;
                 latestObvData = data.obv || [];
+                latestRsiData = data.rsi || [];
                 candleMap = buildDataMap(data.candles);
                 volumeMap = buildDataMap(data.volumes);
-                rsiMap = buildDataMap(data.rsi);
+                rsiMap = buildDataMap(latestRsiData);
                 obvMap = buildDataMap(data.obv);
                 const lastCandle = data.candles[data.candles.length - 1];
                 latestTimeKey = lastCandle ? createTimeKey(lastCandle.time) : null;
                 syncVolumeSeries();
-                rsiSeries.setData(data.rsi);
+                if (rsiSeries) {
+                    rsiSeries.setData(latestRsiData);
+                }
                 obvSeries.setData(data.obv);
                 if (obvBaselineLine) {
                     obvSeries.removePriceLine(obvBaselineLine);
@@ -1422,12 +1497,12 @@ def index() -> str:
 
             const gatherScreenshots = () => {
                 const shots = [];
-                [priceChart, obvChart, rsiChart].forEach(
-                    (chart) => {
-                        const canvas = captureChartCanvas(chart);
-                        if (canvas) shots.push(canvas);
-                    }
-                );
+                [priceChart, obvChart, rsiChart].forEach((chart) => {
+                    if (!chart) return;
+                    if (!isRsiVisible && chart === rsiChart) return;
+                    const canvas = captureChartCanvas(chart);
+                    if (canvas) shots.push(canvas);
+                });
                 return shots;
             };
 
@@ -1553,6 +1628,11 @@ def index() -> str:
                 isVolumeVisible = !isVolumeVisible;
                 updateVolumeButton();
                 syncVolumeSeries();
+            });
+        }
+        if (rsiToggle) {
+            rsiToggle.addEventListener("click", () => {
+                setRsiVisibility(!isRsiVisible);
             });
         }
 
