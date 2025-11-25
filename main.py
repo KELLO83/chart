@@ -685,6 +685,7 @@ def index() -> str:
         const tickerHigh = document.getElementById("ticker-high");
         const tickerLow = document.getElementById("ticker-low");
         const tickerClose = document.getElementById("ticker-close");
+        const tickerStatsElement = document.querySelector(".ticker-stats");
         const cursorDateLabel = document.getElementById("cursor-date-label");
         const MIN_PANEL_HEIGHT = 120;
         const PANEL_FLEX_KEY = "chartPanelFlexState";
@@ -1568,6 +1569,87 @@ def index() -> str:
             }
         };
 
+        const drawRoundedRect = (ctx, x, y, width, height, radius) => {
+            const r = Math.min(radius, width / 2, height / 2);
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + width - r, y);
+            ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+            ctx.lineTo(x + width, y + height - r);
+            ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+            ctx.lineTo(x + r, y + height);
+            ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+        };
+
+        const overlayTickerStatsOnCanvas = (sourceCanvas) => {
+            if (
+                !sourceCanvas ||
+                !tickerStatsElement ||
+                !priceContainer ||
+                !tickerName
+            ) {
+                return sourceCanvas;
+            }
+            const priceRect = priceContainer.getBoundingClientRect();
+            const statsRect = tickerStatsElement.getBoundingClientRect();
+            if (!priceRect.width || !priceRect.height) return sourceCanvas;
+
+            const widthRatio = sourceCanvas.width / priceRect.width;
+            const heightRatio = sourceCanvas.height / priceRect.height;
+            const offsetX = (statsRect.left - priceRect.left) * widthRatio;
+            const offsetY = (statsRect.top - priceRect.top) * heightRatio;
+            const statsWidth = statsRect.width * widthRatio;
+            const statsHeight = statsRect.height * heightRatio;
+
+            const canvas = document.createElement("canvas");
+            canvas.width = sourceCanvas.width;
+            canvas.height = sourceCanvas.height;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(sourceCanvas, 0, 0);
+
+            ctx.save();
+            ctx.globalAlpha = 0.94;
+            ctx.fillStyle = "rgba(7, 10, 18, 0.85)";
+            ctx.strokeStyle = "rgba(34, 45, 72, 0.8)";
+            ctx.lineWidth = Math.max(1, 2 * Math.min(widthRatio, heightRatio));
+            drawRoundedRect(ctx, offsetX, offsetY, statsWidth, statsHeight, 999);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+
+            ctx.save();
+            ctx.fillStyle = "#f5f7ff";
+            const fontSize = Math.max(10, 12 * Math.min(widthRatio, heightRatio));
+            ctx.font = `${fontSize}px "Inter", "Pretendard", sans-serif`;
+            ctx.textBaseline = "middle";
+
+            const values = [
+                { label: "O", value: tickerOpen?.textContent ?? "--" },
+                { label: "H", value: tickerHigh?.textContent ?? "--" },
+                { label: "L", value: tickerLow?.textContent ?? "--" },
+                { label: "C", value: tickerClose?.textContent ?? "--" },
+            ];
+            let cursorX = offsetX + fontSize * 1.2;
+            const centerY = offsetY + statsHeight / 2;
+            ctx.fillText(tickerName?.textContent ?? "--", cursorX, centerY);
+            cursorX += ctx.measureText(tickerName?.textContent ?? "--").width + fontSize;
+            ctx.fillStyle = "#cdd4f7";
+            values.forEach(({ label, value }) => {
+                const labelText = `${label}:`;
+                ctx.fillStyle = "#8690b4";
+                ctx.fillText(labelText, cursorX, centerY);
+                cursorX += ctx.measureText(labelText).width + fontSize * 0.25;
+                ctx.fillStyle = "#dbe4ff";
+                ctx.fillText(value, cursorX, centerY);
+                cursorX += ctx.measureText(value).width + fontSize * 0.75;
+            });
+            ctx.restore();
+            return canvas;
+        };
+
         const focusRecentCandles = async (count) => {
             if (
                 !count ||
@@ -1599,7 +1681,11 @@ def index() -> str:
                     chartInstance &&
                     typeof chartInstance.takeScreenshot === "function"
                 ) {
-                    return chartInstance.takeScreenshot();
+                    const raw = chartInstance.takeScreenshot();
+                    if (chartInstance === priceChart) {
+                        return overlayTickerStatsOnCanvas(raw);
+                    }
+                    return raw;
                 }
                 return null;
             };
