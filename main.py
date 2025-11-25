@@ -390,12 +390,12 @@ def index() -> str:
         .chart-stack {
             display: flex;
             flex-direction: column;
-            gap: 0.65rem;
+            gap: 0.45rem;
             height: 100%;
             min-height: 0;
         }
         .chart-panel {
-            flex: 1;
+            flex: 1 1 0%;
             min-height: 120px;
             background: #000000;
             border: 1px solid #161a28;
@@ -405,14 +405,42 @@ def index() -> str:
             overflow: hidden;
         }
         .chart-panel.price {
-            flex: 4.8;
+            flex-grow: 4.8;
         }
         .chart-panel.obv {
-            flex: 1.8;
+            flex-grow: 1.8;
         }
         .chart-panel.rsi {
-            flex: 1.8;
+            flex-grow: 1.8;
             padding-bottom: 0.35rem;
+        }
+        .panel-resizer {
+            height: 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(22, 26, 40, 0.95);
+            background: radial-gradient(circle, rgba(25, 35, 64, 0.7), rgba(8, 10, 22, 0.95));
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.7);
+            cursor: row-resize;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            touch-action: none;
+        }
+        .panel-resizer::before {
+            content: "";
+            width: 80px;
+            height: 3px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, rgba(73, 129, 255, 0.3), rgba(66, 220, 255, 0.6), rgba(73, 129, 255, 0.3));
+            box-shadow: 0 0 8px rgba(66, 220, 255, 0.35);
+        }
+        .panel-resizer.dragging {
+            background: linear-gradient(120deg, rgba(20, 28, 52, 0.95), rgba(10, 14, 28, 0.95));
+        }
+        body.panel-resize-active {
+            user-select: none;
+            cursor: row-resize;
         }
         .chart-surface {
             width: 100%;
@@ -527,16 +555,22 @@ def index() -> str:
     </div>
     <main>
         <div class="chart-stack">
-            <div class="chart-panel price">
+            <div class="chart-panel price" data-panel-id="price" data-min-height="180">
                 <div class="chart-toolbar">
                     <button type="button" id="volume-toggle" class="pill-button active">거래량 표시</button>
                 </div>
-            <div id="price-chart" class="chart-surface"></div>
+                <div id="price-chart" class="chart-surface"></div>
+            </div>
+            <div class="panel-resizer" role="separator" aria-label="OBV 패널 크기 조절" aria-orientation="horizontal"></div>
+            <div class="chart-panel obv" data-panel-id="obv" data-min-height="120">
+                <div id="obv-chart" class="chart-surface"></div>
+            </div>
+            <div class="panel-resizer" role="separator" aria-label="RSI 패널 크기 조절" aria-orientation="horizontal"></div>
+            <div class="chart-panel rsi" data-panel-id="rsi" data-min-height="120">
+                <div id="rsi-chart" class="chart-surface"></div>
+            </div>
         </div>
-        <div id="obv-chart" class="chart-panel obv"></div>
-        <div id="rsi-chart" class="chart-panel rsi"></div>
-    </div>
-</main>
+    </main>
     <script>
         const priceContainer = document.getElementById("price-chart");
         const rsiContainer = document.getElementById("rsi-chart");
@@ -557,6 +591,17 @@ def index() -> str:
         const statusVolume = document.getElementById("status-volume");
         const statusRsi = document.getElementById("status-rsi");
         const statusObv = document.getElementById("status-obv");
+        const MIN_PANEL_HEIGHT = 120;
+        const PANEL_FLEX_KEY = "chartPanelFlexState";
+        const defaultPanelFlex = {
+            price: 4.8,
+            obv: 1.8,
+            rsi: 1.8,
+        };
+        const chartPanels = Array.from(
+            document.querySelectorAll(".chart-panel[data-panel-id]")
+        );
+        const panelResizers = document.querySelectorAll(".panel-resizer");
         let currentInterval = "1d";
         let currentDataset = null;
         let requestCounter = 0;
@@ -579,6 +624,113 @@ def index() -> str:
                 resizeObserverInstance.observe(container);
             }
         };
+
+        const applySavedPanelFlexState = () => {
+            if (!window?.localStorage) return;
+            try {
+                const stored = window.localStorage.getItem(PANEL_FLEX_KEY);
+                if (!stored) return;
+                const parsed = JSON.parse(stored);
+                chartPanels.forEach((panel) => {
+                    const key = panel.dataset.panelId;
+                    const value = parsed?.[key];
+                    if (typeof value === "number" && value > 0) {
+                        panel.style.flexGrow = value;
+                    }
+                });
+            } catch (error) {
+                console.warn("패널 비율을 복원하지 못했습니다.", error);
+            }
+        };
+
+        const persistPanelFlexState = () => {
+            if (!window?.localStorage) return;
+            try {
+                const payload = {};
+                chartPanels.forEach((panel) => {
+                    const key = panel.dataset.panelId;
+                    const flexGrow =
+                        parseFloat(panel.style.flexGrow) ||
+                        parseFloat(getComputedStyle(panel).flexGrow) ||
+                        defaultPanelFlex[key] ||
+                        1;
+                    payload[key] = parseFloat(flexGrow.toFixed(3));
+                });
+                window.localStorage.setItem(
+                    PANEL_FLEX_KEY,
+                    JSON.stringify(payload)
+                );
+            } catch (error) {
+                console.warn("패널 비율을 저장하지 못했습니다.", error);
+            }
+        };
+
+        const enablePanelResizing = () => {
+            panelResizers.forEach((resizer) => {
+                resizer.addEventListener("pointerdown", (event) => {
+                    const prevPanel = resizer.previousElementSibling;
+                    const nextPanel = resizer.nextElementSibling;
+                    if (
+                        !prevPanel?.classList.contains("chart-panel") ||
+                        !nextPanel?.classList.contains("chart-panel")
+                    ) {
+                        return;
+                    }
+                    event.preventDefault();
+                    const pointerId = event.pointerId;
+                    resizer.setPointerCapture?.(pointerId);
+                    resizer.classList.add("dragging");
+                    document.body.classList.add("panel-resize-active");
+                    const startY = event.clientY;
+                    const prevRect = prevPanel.getBoundingClientRect();
+                    const nextRect = nextPanel.getBoundingClientRect();
+                    const totalHeight = prevRect.height + nextRect.height;
+                    const prevMin =
+                        Number(prevPanel.dataset.minHeight) || MIN_PANEL_HEIGHT;
+                    const nextMin =
+                        Number(nextPanel.dataset.minHeight) || MIN_PANEL_HEIGHT;
+                    const minTotal = prevMin + nextMin;
+                    if (totalHeight <= minTotal) {
+                        resizer.classList.remove("dragging");
+                        document.body.classList.remove("panel-resize-active");
+                        resizer.releasePointerCapture?.(pointerId);
+                        return;
+                    }
+                    const maxPrev = totalHeight - nextMin;
+                    const applySizes = (prevSize) => {
+                        const clampedPrev = Math.max(
+                            prevMin,
+                            Math.min(maxPrev, prevSize)
+                        );
+                        const nextSize = totalHeight - clampedPrev;
+                        prevPanel.style.flexGrow = clampedPrev;
+                        nextPanel.style.flexGrow = nextSize;
+                    };
+                    const handlePointerMove = (moveEvent) => {
+                        const delta = moveEvent.clientY - startY;
+                        applySizes(prevRect.height + delta);
+                    };
+                    const stopResizing = () => {
+                        resizer.classList.remove("dragging");
+                        document.body.classList.remove("panel-resize-active");
+                        window.removeEventListener(
+                            "pointermove",
+                            handlePointerMove
+                        );
+                        window.removeEventListener("pointerup", stopResizing);
+                        resizer.releasePointerCapture?.(pointerId);
+                        persistPanelFlexState();
+                    };
+                    window.addEventListener("pointermove", handlePointerMove);
+                    window.addEventListener("pointerup", stopResizing, {
+                        once: true,
+                    });
+                });
+            });
+        };
+
+        applySavedPanelFlexState();
+        enablePanelResizing();
 
         const businessDayToDate = (time) => {
             if (typeof time === "string") {
