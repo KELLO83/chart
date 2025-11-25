@@ -492,12 +492,44 @@ def index() -> str:
         }
         .chart-toolbar-buttons {
             display: flex;
-            gap: 0.35rem;
+            flex-direction: column;
+            gap: 0.25rem;
+            width: auto;
         }
         .chart-toolbar .pill-button {
-            min-width: 120px;
-            justify-content: center;
+            width: 100%;
+            min-width: 0;
+            justify-content: flex-start;
             display: inline-flex;
+            align-items: center;
+            padding: 0.4rem 0.7rem;
+            background: transparent;
+            border: 1px solid rgba(88, 104, 150, 0.5);
+            border-radius: 999px;
+            color: #97abff;
+            transition: all 0.2s ease;
+            font-size: 0.82rem;
+            box-shadow: none;
+        }
+        .chart-toolbar .pill-button::after {
+            content: "";
+            width: 28px;
+            height: 16px;
+            border-radius: 999px;
+            border: 1px solid rgba(126, 140, 190, 0.7);
+            background: rgba(12, 16, 30, 0.8);
+            position: relative;
+            margin-left: auto;
+            transition: all 0.2s ease;
+        }
+        .chart-toolbar .pill-button.active {
+            color: #1de9b6;
+            border-color: rgba(29, 233, 182, 0.5);
+            box-shadow: 0 0 12px rgba(29, 233, 182, 0.2);
+        }
+        .chart-toolbar .pill-button.active::after {
+            background: linear-gradient(120deg, #1de9b6, #1cb5e0);
+            border-color: transparent;
         }
         .ticker-stats {
             display: inline-flex;
