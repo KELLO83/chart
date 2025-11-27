@@ -127,8 +127,9 @@ def resample_price_data(data: pd.DataFrame, interval: str) -> pd.DataFrame:
     if interval == "1d":
         return data
     rule = ALLOWED_INTERVAL_RULES[interval]
+    # Align resampling to Unix epoch (1970-01-01) to match TradingView's behavior
     aggregated = (
-        data.resample(rule, label="right", closed="right")
+        data.resample(rule, label="right", closed="right", origin="epoch")
         .agg(
             {
                 "open": "first",
