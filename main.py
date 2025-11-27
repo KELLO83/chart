@@ -1102,7 +1102,10 @@ def index() -> str:
                 updateStatusBar(latestTimeKey);
                 if (rsiChart) {
                     requestAnimationFrame(() => {
-                        rsiChart.timeScale().fitContent();
+                        const range = priceChart.timeScale().getVisibleLogicalRange();
+                        if (range) {
+                            rsiChart.timeScale().setVisibleLogicalRange(range);
+                        }
                     });
                 }
             }
@@ -1120,7 +1123,10 @@ def index() -> str:
                 updateStatusBar(latestTimeKey);
                 if (adChart) {
                     requestAnimationFrame(() => {
-                        adChart.timeScale().fitContent();
+                        const range = priceChart.timeScale().getVisibleLogicalRange();
+                        if (range) {
+                            adChart.timeScale().setVisibleLogicalRange(range);
+                        }
                     });
                 }
             }
