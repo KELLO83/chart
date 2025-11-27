@@ -852,6 +852,7 @@ def index() -> str:
             <span class="status-value"><strong>RSI</strong><span id="status-rsi" class="status-data">--</span></span>
             <span class="status-value"><strong>OBV</strong><span id="status-obv" class="status-data">--</span></span>
             <span class="status-value"><strong>A/D</strong><span id="status-ad" class="status-data">--</span></span>
+            <span class="status-value"><strong>Change</strong><span id="status-change" class="status-data">--</span></span>
         </div>
     </div>
     <main>
@@ -866,9 +867,9 @@ def index() -> str:
                         <span class="stat-item"><span class="stat-label">C</span><span id="ticker-close">--</span></span>
                     </div>
                     <div class="chart-toolbar-buttons">
-                        <button type="button" id="volume-toggle" class="pill-button active">거래량 표시</button>
+                        <button type="button" id="volume-toggle" class="pill-button">거래량 표시</button>
                         <button type="button" id="ad-toggle" class="pill-button active">A/D 숨기기</button>
-                        <button type="button" id="rsi-toggle" class="pill-button active">RSI 숨기기</button>
+                        <button type="button" id="rsi-toggle" class="pill-button">RSI 표시</button>
                     </div>
                 </div>
                 <div id="price-chart" class="chart-surface"></div>
@@ -943,6 +944,7 @@ def index() -> str:
         const statusRsi = document.getElementById("status-rsi");
         const statusObv = document.getElementById("status-obv");
         const statusAd = document.getElementById("status-ad");
+        const statusChange = document.getElementById("status-change");
         const tickerName = document.getElementById("ticker-name");
         const tickerOpen = document.getElementById("ticker-open");
         const tickerHigh = document.getElementById("ticker-high");
@@ -972,8 +974,8 @@ def index() -> str:
         let latestVolumeData = [];
         let latestRsiData = [];
         let latestCandles = [];
-        let isVolumeVisible = true;
-        let isRsiVisible = true;
+        let isVolumeVisible = false;
+        let isRsiVisible = false;
         let isAdVisible = true;
         const RECENT_CAPTURE_COUNT = 120;
         let candleMap = new Map();
@@ -1543,7 +1545,7 @@ def index() -> str:
                 },
             });
             adSeries = adChart.addLineSeries({
-                color: "#089981", // Green color for A/D
+                color: "#ff9800", // Orange color for A/D
                 lineWidth: 3.5,
                 priceLineVisible: false,
                 lastValueVisible: false,
@@ -1749,8 +1751,8 @@ def index() -> str:
             if (!volumeToggle) return;
             volumeToggle.classList.toggle("active", isVolumeVisible);
             volumeToggle.textContent = isVolumeVisible
-                ? "거래량 표시"
-                : "거래량 숨김";
+                ? "거래량 숨김"
+                : "거래량 표시";
         };
 
         const syncVolumeSeries = () => {
@@ -1807,6 +1809,17 @@ def index() -> str:
             statusAd.textContent = adPoint
                 ? formatVolumeValue(adPoint.value)
                 : "--";
+
+            if (candle) {
+                const change = ((candle.close - candle.open) / candle.open) * 100;
+                const sign = change > 0 ? "+" : "";
+                statusChange.textContent = `${sign}${change.toFixed(2)}%`;
+                statusChange.style.color = change >= 0 ? "#089981" : "#f23645";
+            } else {
+                statusChange.textContent = "--";
+                statusChange.style.color = "";
+            }
+
             if (tickerOpen) tickerOpen.textContent = candle ? formatNumber(candle.open) : "--";
             if (tickerHigh) tickerHigh.textContent = candle ? formatNumber(candle.high) : "--";
             if (tickerLow) tickerLow.textContent = candle ? formatNumber(candle.low) : "--";
@@ -2443,6 +2456,7 @@ def index() -> str:
                 fullVolumes = [...latestVolumeData];
                 fullRsi = [...latestRsiData];
                 fullObv = [...latestObvData];
+                fullAd = [...latestAdData];
                 replayIndex = fullCandles.length - 1;
             } else {
                 stopReplayTimer();
@@ -2451,16 +2465,20 @@ def index() -> str:
                     if (isVolumeVisible) volumeSeries.setData(fullVolumes);
                     if (rsiSeries) rsiSeries.setData(fullRsi);
                     if (obvSeries) obvSeries.setData(fullObv);
+                    if (adSeries) adSeries.setData(fullAd);
                     
                     latestCandles = fullCandles;
                     latestVolumeData = fullVolumes;
                     latestRsiData = fullRsi;
                     latestObvData = fullObv;
+                    latestAdData = fullAd;
                     
                     candleMap = buildDataMap(fullCandles);
                     volumeMap = buildDataMap(fullVolumes);
                     rsiMap = buildDataMap(fullRsi);
                     obvMap = buildDataMap(fullObv);
+                    adMap = buildDataMap(fullAd);
+
                     
                     const lastCandle = fullCandles[fullCandles.length - 1];
                     latestTimeKey = lastCandle ? createTimeKey(lastCandle.time) : null;
