@@ -1,1 +1,13 @@
+#
+# Ignore everything by default
+*
+
+# Allow directories so that we can include .py files inside them
+!*/
+
+# Track Python source files and this gitignore itself
+!*.py
+!.gitignore
+
+# Still ignore the optional project folder explicitly
 stock_chart_main/

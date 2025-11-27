@@ -1,0 +1,32 @@
+[project]
+name = "kospi-kosdaq-stock-server"
+version = "0.2.2"
+description = "KOSPI/KOSDAQ Stock Data MCP Server"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "requests",
+    "pykrx",
+    "mcp>=0.1.0",
+    "setuptools",
+]
+authors = [
+    {name = "Sangrok Mun", email = "munsangrok@gmail.com"},
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+]
+
+[project.scripts]
+kospi_kosdaq_stock_server = "kospi_kosdaq_stock_server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
