@@ -6,6 +6,7 @@ aiofiles
 python-multipart
 openpyxl
 
+ccxt
 
 
 streamlit

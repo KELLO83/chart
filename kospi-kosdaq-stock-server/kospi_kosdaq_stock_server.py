@@ -12,6 +12,7 @@ from pykrx.stock.stock_api import get_market_ohlcv, get_nearest_business_day_in_
     get_market_fundamental_by_date, get_market_trading_volume_by_date, get_market_trading_volume_by_investor, \
     get_previous_business_days, get_index_ohlcv_by_date
 from pykrx.website.krx.market.wrap import get_market_ticker_and_name
+import ccxt
 
 try:
     from stock_update import StockDataUpdater
@@ -27,7 +28,7 @@ logging.basicConfig(
 # Create MCP server (add pykrx dependency)
 mcp = FastMCP(
     "kospi-kosdaq-stock-server",
-    dependencies=["pykrx"]
+    dependencies=["pykrx", "ccxt"]
 )
 
 # Global variable to store ticker information in memory
@@ -836,3 +837,62 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
+@mcp.tool()
+def fetch_bybit_candles(symbol: str, timeframe: str = '1d', limit: int = 200) -> Dict[str, Any]:
+    """Fetches OHLCV data from Bybit and saves it as a CSV file.
+
+    Args:
+        symbol (str): Trading pair symbol (e.g., 'BTC/USDT', 'ETH/USDT').
+        timeframe (str, optional): Candle timeframe ('1d', '1h', '15m', etc.). Defaults to '1d'.
+        limit (int, optional): Number of candles to fetch. Defaults to 200.
+
+    Returns:
+        Dict[str, Any]: Metadata about the saved dataset.
+    """
+    try:
+        logging.debug(f"Fetching Bybit candles: {symbol}, {timeframe}, limit={limit}")
+        
+        exchange = ccxt.bybit()
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        
+        if not ohlcv:
+            raise ValueError(f"No data returned from Bybit for {symbol}")
+
+        # Convert to DataFrame
+        # ccxt structure: [timestamp, open, high, low, close, volume]
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        
+        # Convert timestamp (ms) to datetime string
+        df['date'] = pd.to_datetime(df['timestamp'], unit='ms')
+        
+        # Format date column. For '1d', we might want YYYY-MM-DD. For others, full timestamp.
+        # To be safe and consistent with main.py's parser, we'll use a full ISO-like string.
+        df['date'] = df['date'].dt.strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Reorder columns to match expected format: date, open, high, low, close, volume
+        df = df[['date', 'open', 'high', 'low', 'close', 'volume']]
+        
+        # Generate filename
+        safe_symbol = symbol.replace('/', '')
+        dataset_id = f"{safe_symbol}_{timeframe}_OHLCV"
+        csv_path = STOCK_DATA_EXPORT_DIR / f"{dataset_id}.csv"
+        
+        # Save to CSV
+        df.to_csv(csv_path, index=False)
+        logging.info(f"Saved Bybit dataset to {csv_path} ({len(df)} rows)")
+        
+        return {
+            "file": str(csv_path),
+            "dataset_id": dataset_id,
+            "rows": len(df),
+            "start": df['date'].iloc[0],
+            "end": df['date'].iloc[-1],
+            "symbol": symbol,
+            "timeframe": timeframe
+        }
+
+    except Exception as e:
+        error_message = f"Failed to fetch Bybit data: {str(e)}"
+        logging.error(error_message)
+        return {"error": error_message}
