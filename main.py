@@ -628,6 +628,90 @@ def index() -> str:
         .status-value.date {
             min-width: 180px;
         }
+        /* Replay UI Styles */
+        .replay-button {
+            background: linear-gradient(135deg, #2962ff, #1e4bd1);
+            color: #ffffff;
+            border: none;
+            padding: 0.45rem 1rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(41, 98, 255, 0.4);
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .replay-button:hover {
+            background: linear-gradient(135deg, #3d72ff, #2955db);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(41, 98, 255, 0.5);
+        }
+        .replay-button.active {
+            background: #f23645;
+            box-shadow: 0 4px 12px rgba(242, 54, 69, 0.4);
+        }
+        .replay-controls {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(15, 20, 35, 0.95);
+            border: 1px solid rgba(45, 55, 85, 0.8);
+            padding: 0.6rem 1.2rem;
+            border-radius: 999px;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.75);
+            z-index: 100;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            backdrop-filter: blur(10px);
+        }
+        .replay-controls.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+            pointer-events: auto;
+        }
+        .replay-control-btn {
+            background: transparent;
+            border: none;
+            color: #cdd4f7;
+            cursor: pointer;
+            padding: 0.4rem;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+        .replay-control-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+        }
+        .replay-control-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: currentColor;
+        }
+        .replay-speed-select {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #cdd4f7;
+            border-radius: 6px;
+            padding: 0.2rem 0.4rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+        }
+        .replay-divider {
+            width: 1px;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.15);
+        }
     </style>
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -638,6 +722,10 @@ def index() -> str:
             <p id="dataset-meta">데이터셋 정보를 불러오는 중...</p>
         </div>
         <div class="header-controls">
+            <button id="replay-toggle" class="replay-button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+                리플레이
+            </button>
             <div class="dataset-picker">
                 <label for="dataset-select">DATASET</label>
                 <select id="dataset-select" aria-label="데이터셋 선택"></select>
@@ -697,6 +785,29 @@ def index() -> str:
             <div id="time-axis-chart" class="chart-surface"></div>
         </div>
     </main>
+    <div id="replay-controls" class="replay-controls">
+        <button id="replay-prev" class="replay-control-btn" title="이전 캔들">
+            <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button id="replay-play" class="replay-control-btn" title="재생/일시정지">
+            <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <svg id="icon-pause" viewBox="0 0 24 24" style="display:none"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+        </button>
+        <button id="replay-next" class="replay-control-btn" title="다음 캔들">
+            <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        </button>
+        <div class="replay-divider"></div>
+        <select id="replay-speed" class="replay-speed-select">
+            <option value="1000">1.0x</option>
+            <option value="500">2.0x</option>
+            <option value="200">5.0x</option>
+            <option value="100">10.0x</option>
+        </select>
+        <div class="replay-divider"></div>
+        <button id="replay-close" class="replay-control-btn" title="리플레이 종료">
+            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+    </div>
     <script>
         const priceContainer = document.getElementById("price-chart");
         const rsiContainer = document.getElementById("rsi-chart");
@@ -757,6 +868,27 @@ def index() -> str:
         let latestTimeKey = null;
         const containerChartMap = new Map();
         let resizeObserverInstance = null;
+
+        // Replay State
+        let isReplayMode = false;
+        let replayIndex = -1;
+        let replayTimer = null;
+        let replaySpeed = 1000;
+        let fullCandles = [];
+        let fullVolumes = [];
+        let fullRsi = [];
+        let fullObv = [];
+
+        // Replay UI Elements
+        const replayToggle = document.getElementById("replay-toggle");
+        const replayControls = document.getElementById("replay-controls");
+        const replayPrev = document.getElementById("replay-prev");
+        const replayPlay = document.getElementById("replay-play");
+        const replayNext = document.getElementById("replay-next");
+        const replaySpeedSelect = document.getElementById("replay-speed");
+        const replayClose = document.getElementById("replay-close");
+        const iconPlay = document.getElementById("icon-play");
+        const iconPause = document.getElementById("icon-pause");
         try {
             if (window?.localStorage) {
                 const storedVisibility =
@@ -1110,6 +1242,7 @@ def index() -> str:
         };
 
         const initializeCharts = () => {
+            console.log("Initializing charts...");
             priceChart = createChart(priceContainer);
             obvChart = createChart(obvContainer, {
                 grid: {
@@ -1294,6 +1427,29 @@ def index() -> str:
             [priceChart, obvChart, rsiChart].forEach((chart) => {
                 chart?.subscribeCrosshairMove(handleCrosshairMove);
             });
+            try {
+                if (priceChart && typeof priceChart.subscribeClick === 'function') {
+                    priceChart.subscribeClick(handleChartClick);
+                    console.log("Subscribed to chart click");
+                } else {
+                    console.warn("subscribeClick not supported or priceChart invalid");
+                }
+            } catch (e) {
+                console.error("Failed to subscribe to click:", e);
+            }
+            console.log("Charts initialized successfully");
+        };
+
+        const handleChartClick = (param) => {
+            if (!isReplayMode || !param || !param.time) return;
+            const clickedTimeKey = createTimeKey(param.time);
+            const targetIndex = fullCandles.findIndex(c => createTimeKey(c.time) === clickedTimeKey);
+
+            if (targetIndex !== -1) {
+                replayIndex = targetIndex;
+                updateChartData(replayIndex);
+                stopReplayTimer();
+            }
         };
 
         const hideTimeAxis = (chart) => {
@@ -1529,6 +1685,10 @@ def index() -> str:
 
         const loadInterval = async (interval, dataset = currentDataset) => {
             if (!dataset) return;
+            // Reset Replay Mode on new data load
+            if (isReplayMode) {
+                toggleReplayMode(false);
+            }
             const token = ++requestCounter;
             setActiveIntervalButton(interval);
             try {
@@ -1885,7 +2045,149 @@ def index() -> str:
         });
         resizeObserverInstance = resizeObserver;
 
+        // Replay Logic Functions
+        const updateChartData = (index) => {
+            if (index < 0 || index >= fullCandles.length) return;
+            
+            const slicedCandles = fullCandles.slice(0, index + 1);
+            const slicedVolumes = fullVolumes.slice(0, index + 1);
+            const slicedRsi = fullRsi.slice(0, index + 1);
+            const slicedObv = fullObv.slice(0, index + 1);
+
+            candleSeries.setData(slicedCandles);
+            if (isVolumeVisible) volumeSeries.setData(slicedVolumes);
+            latestVolumeData = slicedVolumes; 
+            
+            if (rsiSeries) rsiSeries.setData(slicedRsi);
+            if (obvSeries) obvSeries.setData(slicedObv);
+            
+            latestCandles = slicedCandles;
+            latestObvData = slicedObv;
+            latestRsiData = slicedRsi;
+            
+            candleMap = buildDataMap(slicedCandles);
+            volumeMap = buildDataMap(slicedVolumes);
+            rsiMap = buildDataMap(slicedRsi);
+            obvMap = buildDataMap(slicedObv);
+            
+            const lastCandle = slicedCandles[slicedCandles.length - 1];
+            latestTimeKey = lastCandle ? createTimeKey(lastCandle.time) : null;
+            updateStatusBar(latestTimeKey);
+        };
+
+        const stopReplayTimer = () => {
+            if (replayTimer) {
+                clearInterval(replayTimer);
+                replayTimer = null;
+            }
+            if (iconPlay) iconPlay.style.display = "block";
+            if (iconPause) iconPause.style.display = "none";
+        };
+
+        const toggleReplayMode = (active) => {
+            isReplayMode = active;
+            if (replayToggle) replayToggle.classList.toggle("active", active);
+            if (replayControls) replayControls.classList.toggle("visible", active);
+            
+            if (active) {
+                fullCandles = [...latestCandles];
+                fullVolumes = [...latestVolumeData];
+                fullRsi = [...latestRsiData];
+                fullObv = [...latestObvData];
+                replayIndex = fullCandles.length - 1;
+                alert("차트의 캔들을 클릭하여 리플레이 시작 시점을 선택하세요.");
+            } else {
+                stopReplayTimer();
+                if (fullCandles.length > 0) {
+                    candleSeries.setData(fullCandles);
+                    if (isVolumeVisible) volumeSeries.setData(fullVolumes);
+                    if (rsiSeries) rsiSeries.setData(fullRsi);
+                    if (obvSeries) obvSeries.setData(fullObv);
+                    
+                    latestCandles = fullCandles;
+                    latestVolumeData = fullVolumes;
+                    latestRsiData = fullRsi;
+                    latestObvData = fullObv;
+                    
+                    candleMap = buildDataMap(fullCandles);
+                    volumeMap = buildDataMap(fullVolumes);
+                    rsiMap = buildDataMap(fullRsi);
+                    obvMap = buildDataMap(fullObv);
+                    
+                    const lastCandle = fullCandles[fullCandles.length - 1];
+                    latestTimeKey = lastCandle ? createTimeKey(lastCandle.time) : null;
+                    updateStatusBar(latestTimeKey);
+                }
+            }
+        };
+
+        const stepReplay = () => {
+            if (replayIndex >= fullCandles.length - 1) {
+                stopReplayTimer();
+                return;
+            }
+            replayIndex++;
+            updateChartData(replayIndex);
+        };
+
+        const playReplay = () => {
+            if (replayTimer) {
+                stopReplayTimer();
+            } else {
+                if (replayIndex >= fullCandles.length - 1) {
+                    replayIndex = 0; 
+                }
+                replayTimer = setInterval(stepReplay, replaySpeed);
+                if (iconPlay) iconPlay.style.display = "none";
+                if (iconPause) iconPause.style.display = "block";
+            }
+        };
+
+        if (replayToggle) {
+            replayToggle.addEventListener("click", () => {
+                toggleReplayMode(!isReplayMode);
+            });
+        }
+
+        if (replayClose) {
+            replayClose.addEventListener("click", () => {
+                toggleReplayMode(false);
+            });
+        }
+
+        if (replayPlay) {
+            replayPlay.addEventListener("click", playReplay);
+        }
+
+        if (replayNext) {
+            replayNext.addEventListener("click", () => {
+                stopReplayTimer();
+                stepReplay();
+            });
+        }
+
+        if (replayPrev) {
+            replayPrev.addEventListener("click", () => {
+                stopReplayTimer();
+                if (replayIndex > 0) {
+                    replayIndex--;
+                    updateChartData(replayIndex);
+                }
+            });
+        }
+
+        if (replaySpeedSelect) {
+            replaySpeedSelect.addEventListener("change", (e) => {
+                replaySpeed = parseInt(e.target.value, 10);
+                if (replayTimer) {
+                    stopReplayTimer();
+                    playReplay();
+                }
+            });
+        }
+
         bootstrapDatasets();
+
 
         document.addEventListener("keydown", (event) => {
             if (
