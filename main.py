@@ -2201,9 +2201,10 @@ def index() -> str:
 
             const gatherScreenshots = () => {
                 const shots = [];
-                [priceChart, obvChart, rsiChart, timeAxisChart].forEach((chart) => {
+                [priceChart, obvChart, adChart, rsiChart, timeAxisChart].forEach((chart) => {
                     if (!chart) return;
                     if (!isRsiVisible && chart === rsiChart) return;
+                    if (!isAdVisible && chart === adChart) return;
                     const canvas = captureChartCanvas(chart);
                     if (canvas) shots.push(canvas);
                 });
