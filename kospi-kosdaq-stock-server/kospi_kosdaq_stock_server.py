@@ -115,46 +115,25 @@ def get_ticker_map() -> str:
 def search_stock_data_prompt() -> str:
     """Prompt template for searching stock data."""
     return """
-    Step-by-step guide for searching stock data by stock name:
+    Step-by-step guide for searching stock data:
 
-    1. First, load the ticker information for all stocks:
-       load_all_tickers()
+    [Korean Stocks (KOSPI/KOSDAQ)]
+    1. Load tickers: load_all_tickers()
+    2. Find ticker: Refer to stock://tickers
+    3. Retrieve data:
+       - OHLCV: get_stock_ohlcv("YYYYMMDD", "YYYYMMDD", "ticker")
+       - Market Cap: get_stock_market_cap(...)
+       - Fundamentals: get_stock_fundamental(...)
+       - Investor Volume: get_stock_trading_volume(...)
 
-    2. Check the code of the desired stock from the loaded ticker information:
-       Refer to the stock://tickers resource to find the ticker corresponding to the stock name.
+    [US Stocks (NASDAQ/NYSE)]
+    1. Retrieve data using the ticker symbol directly (e.g., AAPL, TSLA, NVDA):
+       - OHLCV (JSON): get_nasdaq_ohlcv("AAPL", period="1mo", interval="1d")
+       - Fundamentals: get_nasdaq_fundamental("AAPL")
+       - Export CSV: export_nasdaq_dataset("AAPL", period="2y")
 
-    3. Retrieve the desired data using the found ticker:
-
-       Retrieve OHLCV (Open/High/Low/Close/Volume) data:
-       get_stock_ohlcv("start_date", "end_date", "ticker", adjusted=True)
-
-       Retrieve market capitalization data:
-       get_stock_market_cap("start_date", "end_date", "ticker")
-
-       Retrieve fundamental indicators (PER/PBR/Dividend Yield):
-       get_stock_fundamental("start_date", "end_date", "ticker")
-
-       Retrieve trading volume by investor type:
-       get_stock_trading_volume("start_date", "end_date", "ticker")
-
-       Retrieve index OHLCV data (KOSPI, KOSDAQ, etc.):
-       get_index_ohlcv("start_date", "end_date", "ticker", freq="d")
-       - ticker: 1001 for KOSPI, 2001 for KOSDAQ
-       - freq: "d" for daily, "m" for monthly, "y" for yearly
-
-    Example) To retrieve data for Samsung Electronics in January 2024:
-    1. load_all_tickers()  # Load all tickers
-    2. Refer to stock://tickers  # Check Samsung Electronics = 005930
-    3. get_stock_ohlcv("20240101", "20240131", "005930")  # Retrieve OHLCV data
-       or
-       get_stock_market_cap("20240101", "20240131", "005930")  # Retrieve market cap data
-       or
-       get_stock_fundamental("20240101", "20240131", "005930")  # Retrieve fundamental data
-       or
-       get_stock_trading_volume("20240101", "20240131", "005930")  # Retrieve trading volume
-
-    Example) To retrieve KOSPI index data for January 2021:
-       get_index_ohlcv("20210101", "20210131", "1001", freq="d")  # Daily KOSPI data
+    [Crypto]
+    - Use ccxt tools (if available) or check crypto_data directory.
     """
 
 @mcp.tool()
@@ -903,5 +882,98 @@ def fetch_bybit_candles(symbol: str, timeframe: str = '1d', limit: int = 200) ->
 
     except Exception as e:
         error_message = f"Failed to fetch Bybit data: {str(e)}"
+        logging.error(error_message)
+        return {"error": error_message}
+
+
+@mcp.tool()
+def get_nasdaq_ohlcv(
+    ticker: str,
+    period: str = "1mo",
+    interval: str = "1d"
+) -> Dict[str, Any]:
+    """Retrieves OHLCV data for a US stock as a JSON dictionary.
+
+    Args:
+        ticker: Stock ticker symbol (e.g., AAPL)
+        period: Data period (e.g., 1mo, 3mo, 1y)
+        interval: Data interval (e.g., 1d, 1wk)
+
+    Returns:
+        Dictionary containing OHLCV data.
+    """
+    try:
+        logging.debug(f"Retrieving NASDAQ OHLCV: {ticker}, period={period}, interval={interval}")
+        
+        df = yf.download(ticker, period=period, interval=interval, progress=False)
+        
+        if df.empty:
+            return {"error": f"No data found for {ticker}"}
+
+        # Flatten MultiIndex columns if present
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
+        # Rename columns
+        df = df.rename(columns={
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Volume": "volume"
+        })
+
+        # Ensure required columns
+        required_cols = ["open", "high", "low", "close", "volume"]
+        available_cols = [c for c in required_cols if c in df.columns]
+        df = df[available_cols].dropna()
+
+        # Convert to dict with date as key (or list of records)
+        # Using orient='index' with date string keys
+        result = {}
+        for date, row in df.iterrows():
+            date_str = date.strftime("%Y-%m-%d")
+            result[date_str] = row.to_dict()
+            
+        # Sort by date descending
+        sorted_result = dict(sorted(result.items(), key=lambda item: item[0], reverse=True))
+        
+        return sorted_result
+
+    except Exception as e:
+        error_message = f"Failed to retrieve NASDAQ OHLCV: {str(e)}"
+        logging.error(error_message)
+        return {"error": error_message}
+
+
+@mcp.tool()
+def get_nasdaq_fundamental(ticker: str) -> Dict[str, Any]:
+    """Retrieves fundamental data (Market Cap, P/E, etc.) for a US stock.
+
+    Args:
+        ticker: Stock ticker symbol (e.g., AAPL)
+
+    Returns:
+        Dictionary of key fundamental metrics.
+    """
+    try:
+        logging.debug(f"Retrieving NASDAQ fundamentals: {ticker}")
+        
+        ticker_obj = yf.Ticker(ticker)
+        info = ticker_obj.info
+        
+        # Select key metrics to avoid returning too much data
+        keys = [
+            "shortName", "longName", "sector", "industry", "currency",
+            "marketCap", "enterpriseValue", "trailingPE", "forwardPE",
+            "pegRatio", "priceToBook", "dividendYield", "fiftyTwoWeekHigh",
+            "fiftyTwoWeekLow", "longBusinessSummary"
+        ]
+        
+        result = {k: info.get(k) for k in keys if k in info}
+        return result
+
+    except Exception as e:
+        error_message = f"Failed to retrieve NASDAQ fundamentals: {str(e)}"
         logging.error(error_message)
         return {"error": error_message}

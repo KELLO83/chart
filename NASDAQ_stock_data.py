@@ -71,7 +71,7 @@ def get_us_stock_ohlcv(
 
 if __name__ == "__main__":
     target_ticker = "AAPL"  # Apple
-    output_dir = Path(__file__).parent / "stock_data"
+    output_dir = Path(__file__).parent / "nasdaq_data"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{target_ticker}_2Y_OHLCV.csv"
 
