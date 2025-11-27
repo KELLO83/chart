@@ -653,6 +653,30 @@ def index() -> str:
             background: #f23645;
             box-shadow: 0 4px 12px rgba(242, 54, 69, 0.4);
         }
+        .reselect-button {
+            background: rgba(255, 255, 255, 0.1);
+            color: #cdd4f7;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 0.45rem 1rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: none; /* Hidden by default */
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .reselect-button:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: #ffffff;
+        }
+        .reselect-button.active {
+            background: #2962ff;
+            border-color: #2962ff;
+            color: #ffffff;
+            box-shadow: 0 0 10px rgba(41, 98, 255, 0.5);
+        }
         .replay-controls {
             position: fixed;
             bottom: 80px;
@@ -725,6 +749,10 @@ def index() -> str:
             <button id="replay-toggle" class="replay-button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
                 리플레이
+            </button>
+            <button id="replay-reselect" class="reselect-button">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+                다시 선택
             </button>
             <div class="dataset-picker">
                 <label for="dataset-select">DATASET</label>
@@ -871,6 +899,7 @@ def index() -> str:
 
         // Replay State
         let isReplayMode = false;
+        let isReselecting = false;
         let replayIndex = -1;
         let replayTimer = null;
         let replaySpeed = 1000;
@@ -881,6 +910,7 @@ def index() -> str:
 
         // Replay UI Elements
         const replayToggle = document.getElementById("replay-toggle");
+        const replayReselect = document.getElementById("replay-reselect");
         const replayControls = document.getElementById("replay-controls");
         const replayPrev = document.getElementById("replay-prev");
         const replayPlay = document.getElementById("replay-play");
@@ -1446,9 +1476,25 @@ def index() -> str:
             const targetIndex = fullCandles.findIndex(c => createTimeKey(c.time) === clickedTimeKey);
 
             if (targetIndex !== -1) {
-                replayIndex = targetIndex;
-                updateChartData(replayIndex);
-                stopReplayTimer();
+                if (isReselecting) {
+                    // In reselect mode, only allow rewinding (going back)
+                    if (targetIndex <= replayIndex) {
+                        replayIndex = targetIndex;
+                        updateChartData(replayIndex);
+                        isReselecting = false;
+                        if (replayReselect) replayReselect.classList.remove("active");
+                        alert("선택한 시점으로 되돌아갔습니다.");
+                    } else {
+                        alert("현재 시점보다 과거의 캔들을 선택해주세요.");
+                    }
+                } else {
+                    // Initial selection logic (only when starting replay)
+                    if (replayIndex === fullCandles.length - 1) { // Only if we haven't started slicing yet
+                         replayIndex = targetIndex;
+                         updateChartData(replayIndex);
+                         stopReplayTimer();
+                    }
+                }
             }
         };
 
@@ -2086,8 +2132,13 @@ def index() -> str:
 
         const toggleReplayMode = (active) => {
             isReplayMode = active;
+            isReselecting = false;
             if (replayToggle) replayToggle.classList.toggle("active", active);
             if (replayControls) replayControls.classList.toggle("visible", active);
+            if (replayReselect) {
+                replayReselect.style.display = active ? "inline-flex" : "none";
+                replayReselect.classList.remove("active");
+            }
             
             if (active) {
                 fullCandles = [...latestCandles];
@@ -2120,6 +2171,21 @@ def index() -> str:
                 }
             }
         };
+
+        const resetReplaySelection = () => {
+            if (!isReplayMode) return;
+            stopReplayTimer();
+            isReselecting = !isReselecting; // Toggle reselect mode
+            if (replayReselect) replayReselect.classList.toggle("active", isReselecting);
+            
+            if (isReselecting) {
+                alert("되돌아갈 과거 캔들을 클릭하세요.");
+            }
+        };
+
+        if (replayReselect) {
+            replayReselect.addEventListener("click", resetReplaySelection);
+        }
 
         const stepReplay = () => {
             if (replayIndex >= fullCandles.length - 1) {
