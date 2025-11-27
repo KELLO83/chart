@@ -1730,10 +1730,17 @@ def index() -> str:
 
         const loadInterval = async (interval, dataset = currentDataset) => {
             if (!dataset) return;
-            // Reset Replay Mode on new data load
-            if (isReplayMode) {
-                toggleReplayMode(false);
+            // Capture Replay State if active
+            let wasReplayMode = isReplayMode;
+            let targetReplayTime = null;
+            if (wasReplayMode && fullCandles.length > 0 && fullCandles[replayIndex]) {
+                targetReplayTime = fullCandles[replayIndex].time;
             }
+            
+            // Do NOT toggle replay mode off automatically
+            // if (isReplayMode) {
+            //    toggleReplayMode(false);
+            // }
             const token = ++requestCounter;
             setActiveIntervalButton(interval);
             try {
@@ -1763,22 +1770,47 @@ def index() -> str:
                     currentChartType = data.type || "stock";
                 }
 
-                candleSeries.setData(data.candles);
-                latestVolumeData = data.volumes;
                 latestCandles = data.candles;
+                latestVolumeData = data.volumes;
                 latestObvData = data.obv || [];
                 latestRsiData = data.rsi || [];
+                
                 candleMap = buildDataMap(data.candles);
                 volumeMap = buildDataMap(data.volumes);
                 rsiMap = buildDataMap(latestRsiData);
                 obvMap = buildDataMap(data.obv);
+                
                 const lastCandle = data.candles[data.candles.length - 1];
                 latestTimeKey = lastCandle ? createTimeKey(lastCandle.time) : null;
-                syncVolumeSeries();
-                if (rsiSeries) {
-                    rsiSeries.setData(latestRsiData);
+
+                if (wasReplayMode && targetReplayTime) {
+                    // Update full datasets for replay
+                    fullCandles = [...latestCandles];
+                    fullVolumes = [...latestVolumeData];
+                    fullRsi = [...latestRsiData];
+                    fullObv = [...latestObvData];
+
+                    // Find new replay index based on time
+                    let newIndex = fullCandles.length - 1;
+                    for (let i = 0; i < fullCandles.length; i++) {
+                        if (fullCandles[i].time > targetReplayTime) {
+                            newIndex = Math.max(0, i - 1);
+                            break;
+                        }
+                    }
+                    replayIndex = newIndex;
+                    
+                    // Update chart with sliced data
+                    updateChartData(replayIndex);
+                } else {
+                    // Normal mode: show all data
+                    candleSeries.setData(data.candles);
+                    syncVolumeSeries();
+                    if (rsiSeries) {
+                        rsiSeries.setData(latestRsiData);
+                    }
+                    obvSeries.setData(data.obv);
                 }
-                obvSeries.setData(data.obv);
                 if (timeAxisSeries && latestCandles.length) {
                     timeAxisSeries.setData(
                         latestCandles.map((point) => ({
@@ -2286,6 +2318,7 @@ def index() -> str:
                 }
             }
         });
+
     </script>
 </body>
 </html>
