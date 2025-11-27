@@ -14,6 +14,7 @@ from indicator.ad import compute_ad
 
 STOCK_DIR = Path(__file__).with_name("stock_data")
 CRYPTO_DIR = Path(__file__).with_name("crypto_data")
+NASDAQ_DIR = Path(__file__).with_name("nasdaq_data")
 DEFAULT_DATASET_ID = "ETHUSDT_2Y_OHLCV_Trans"
 UP_COLOR = "#089981"
 DOWN_COLOR = "#f23645"
@@ -65,9 +66,15 @@ def get_dataset_catalog() -> Dict[str, Path]:
             if p.suffix.lower() == ".csv":
                 catalog[p.stem] = p
 
+    # Load NASDAQ Data
+    if NASDAQ_DIR.exists():
+        for p in NASDAQ_DIR.iterdir():
+            if p.suffix.lower() == ".csv":
+                catalog[p.stem] = p
+
     if not catalog:
         # If both are empty or missing, raise error
-        raise ValueError("데이터셋 폴더(stock_data, crypto_data)에 CSV 파일이 없습니다.")
+        raise ValueError("데이터셋 폴더(stock_data, crypto_data, nasdaq_data)에 CSV 파일이 없습니다.")
         
     return catalog
 
@@ -187,7 +194,13 @@ def get_dataset_summary(dataset_id: str) -> Dict[str, Any]:
     end = data.index.max()
     
     # Determine category
-    category = "crypto" if csv_path.parent.name == "crypto_data" else "stock"
+    parent_name = csv_path.parent.name
+    if parent_name == "crypto_data":
+        category = "crypto"
+    elif parent_name == "nasdaq_data":
+        category = "nasdaq"
+    else:
+        category = "stock"
     
     return {
         "id": dataset_id,
@@ -825,6 +838,7 @@ def index() -> str:
             <div class="dataset-picker">
                 <div class="category-tabs">
                     <button class="category-tab active" data-category="stock">Stock</button>
+                    <button class="category-tab" data-category="nasdaq">NASDAQ</button>
                     <button class="category-tab" data-category="crypto">Crypto</button>
                 </div>
                 <label for="dataset-select" style="display:none;">DATASET</label>

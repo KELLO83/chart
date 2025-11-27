@@ -13,6 +13,7 @@ from pykrx.stock.stock_api import get_market_ohlcv, get_nearest_business_day_in_
     get_previous_business_days, get_index_ohlcv_by_date
 from pykrx.website.krx.market.wrap import get_market_ticker_and_name
 import ccxt
+import yfinance as yf
 
 try:
     from stock_update import StockDataUpdater
@@ -28,7 +29,7 @@ logging.basicConfig(
 # Create MCP server (add pykrx dependency)
 mcp = FastMCP(
     "kospi-kosdaq-stock-server",
-    dependencies=["pykrx", "ccxt"]
+    dependencies=["pykrx", "ccxt", "yfinance"]
 )
 
 # Global variable to store ticker information in memory
@@ -49,6 +50,10 @@ STOCK_DATA_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 # Directory for exporting crypto data
 CRYPTO_DATA_EXPORT_DIR = (Path(__file__).resolve().parent.parent / "crypto_data").resolve()
 CRYPTO_DATA_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+# Directory for exporting NASDAQ data
+NASDAQ_DATA_EXPORT_DIR = (Path(__file__).resolve().parent.parent / "nasdaq_data").resolve()
+NASDAQ_DATA_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 @mcp.tool()
 def load_all_tickers() -> Dict[str, str]:

@@ -11,3 +11,4 @@ ccxt
 
 streamlit
 TA-Lib
+yfinance
