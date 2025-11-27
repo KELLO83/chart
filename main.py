@@ -1483,9 +1483,8 @@ def index() -> str:
                         updateChartData(replayIndex);
                         isReselecting = false;
                         if (replayReselect) replayReselect.classList.remove("active");
-                        alert("선택한 시점으로 되돌아갔습니다.");
                     } else {
-                        alert("현재 시점보다 과거의 캔들을 선택해주세요.");
+                        console.log("Future candle selected in reselect mode - ignored");
                     }
                 } else {
                     // Initial selection logic (only when starting replay)
@@ -2146,7 +2145,6 @@ def index() -> str:
                 fullRsi = [...latestRsiData];
                 fullObv = [...latestObvData];
                 replayIndex = fullCandles.length - 1;
-                alert("차트의 캔들을 클릭하여 리플레이 시작 시점을 선택하세요.");
             } else {
                 stopReplayTimer();
                 if (fullCandles.length > 0) {
@@ -2177,10 +2175,6 @@ def index() -> str:
             stopReplayTimer();
             isReselecting = !isReselecting; // Toggle reselect mode
             if (replayReselect) replayReselect.classList.toggle("active", isReselecting);
-            
-            if (isReselecting) {
-                alert("되돌아갈 과거 캔들을 클릭하세요.");
-            }
         };
 
         if (replayReselect) {
@@ -2273,6 +2267,23 @@ def index() -> str:
                 copyChartScreenshotToClipboard({
                     recentCandles: RECENT_CAPTURE_COUNT,
                 });
+            }
+
+            // Replay Shortcuts
+            if (isReplayMode && event.shiftKey) {
+                if (event.key === "ArrowRight") {
+                    event.preventDefault();
+                    stopReplayTimer();
+                    stepReplay();
+                }
+                if (event.key === "ArrowLeft") {
+                    event.preventDefault();
+                    stopReplayTimer();
+                    if (replayIndex > 0) {
+                        replayIndex--;
+                        updateChartData(replayIndex);
+                    }
+                }
             }
         });
     </script>
