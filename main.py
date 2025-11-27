@@ -9,9 +9,11 @@ import uvicorn
 
 from indicator.rsi import RSI_COLOR, compute_rsi
 from indicator.obv import compute_obv
+from indicator.ad import compute_ad
 
 
-DATA_DIR = Path(__file__).with_name("stock_data")
+STOCK_DIR = Path(__file__).with_name("stock_data")
+CRYPTO_DIR = Path(__file__).with_name("crypto_data")
 DEFAULT_DATASET_ID = "ETHUSDT_2Y_OHLCV_Trans"
 UP_COLOR = "#089981"
 DOWN_COLOR = "#f23645"
@@ -49,12 +51,25 @@ def load_price_data(csv_path: Path) -> pd.DataFrame:
 
 
 def get_dataset_catalog() -> Dict[str, Path]:
-    if not DATA_DIR.exists():
-        raise ValueError("stock_data 폴더를 찾을 수 없습니다.")
-    csv_files = sorted(p for p in DATA_DIR.iterdir() if p.suffix.lower() == ".csv")
-    if not csv_files:
-        raise ValueError("stock_data 폴더에 CSV 데이터셋이 없습니다.")
-    return {csv.stem: csv for csv in csv_files}
+    catalog = {}
+    
+    # Load Stock Data
+    if STOCK_DIR.exists():
+        for p in STOCK_DIR.iterdir():
+            if p.suffix.lower() == ".csv":
+                catalog[p.stem] = p
+                
+    # Load Crypto Data
+    if CRYPTO_DIR.exists():
+        for p in CRYPTO_DIR.iterdir():
+            if p.suffix.lower() == ".csv":
+                catalog[p.stem] = p
+
+    if not catalog:
+        # If both are empty or missing, raise error
+        raise ValueError("데이터셋 폴더(stock_data, crypto_data)에 CSV 파일이 없습니다.")
+        
+    return catalog
 
 
 def get_default_dataset_id() -> str:
@@ -70,9 +85,8 @@ def normalize_dataset_id(dataset_id: Optional[str]) -> str:
     if not target:
         return get_default_dataset_id()
     if target not in catalog:
-        raise ValueError(
-            f"지원하지 않는 데이터셋입니다. 사용 가능: {', '.join(sorted(catalog))}"
-        )
+        # Fallback to default if not found
+        return get_default_dataset_id()
     return target
 
 
@@ -95,7 +109,17 @@ def _normalize_time_payload(
 
 
 def is_crypto_dataset(dataset_id: str) -> bool:
-    """Determine if the dataset is a crypto pair based on its ID."""
+    """Determine if the dataset is a crypto pair based on its ID or Path."""
+    # Check path via catalog
+    try:
+        catalog = get_dataset_catalog()
+        path = catalog.get(dataset_id)
+        if path and path.parent.name == "crypto_data":
+            return True
+    except Exception:
+        pass
+        
+    # Fallback to name check
     keywords = {"ETH", "BTC", "USDT", "BNB", "XRP", "SOL", "ADA", "DOGE"}
     upper_id = dataset_id.upper()
     return any(k in upper_id for k in keywords)
@@ -156,14 +180,21 @@ def _build_payload(dataset_id: str, normalized_interval: str) -> Dict[str, Any]:
 
 
 def get_dataset_summary(dataset_id: str) -> Dict[str, Any]:
+    catalog = get_dataset_catalog()
+    csv_path = catalog[dataset_id]
     data = get_price_data(dataset_id)
     start = data.index.min()
     end = data.index.max()
+    
+    # Determine category
+    category = "crypto" if csv_path.parent.name == "crypto_data" else "stock"
+    
     return {
         "id": dataset_id,
         "label": dataset_id.replace("_", " "),
         "rows": len(data),
         "range": f"{start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')}",
+        "category": category
     }
 
 
@@ -172,9 +203,15 @@ def format_chart_payload(data: pd.DataFrame, is_crypto: bool = False) -> Dict[st
     volumes: List[Dict] = []
     rsi_points: List[Dict] = []
     obv_points: List[Dict] = []
+    ad_points: List[Dict] = []
     rsi_series = compute_rsi(data["close"])
     obv_series = (
         compute_obv(data["close"], data["volume"])
+        .reindex(data.index, method="ffill")
+        .fillna(0.0)
+    )
+    ad_series = (
+        compute_ad(data)
         .reindex(data.index, method="ffill")
         .fillna(0.0)
     )
@@ -204,6 +241,9 @@ def format_chart_payload(data: pd.DataFrame, is_crypto: bool = False) -> Dict[st
         obv_points.append(
             {"time": time_payload, "value": float(obv_series.loc[timestamp])}
         )
+        ad_points.append(
+            {"time": time_payload, "value": float(ad_series.loc[timestamp])}
+        )
 
     return {
         "type": "crypto" if is_crypto else "stock",
@@ -211,6 +251,7 @@ def format_chart_payload(data: pd.DataFrame, is_crypto: bool = False) -> Dict[st
         "volumes": volumes,
         "rsi": rsi_points,
         "obv": obv_points,
+        "ad": ad_points,
     }
 
 
@@ -737,6 +778,32 @@ def index() -> str:
             height: 20px;
             background: rgba(255, 255, 255, 0.15);
         }
+        .category-tabs {
+            display: flex;
+            gap: 0.25rem;
+            margin-bottom: 0.35rem;
+        }
+        .category-tab {
+            background: transparent;
+            border: 1px solid rgba(47, 63, 101, 0.7);
+            color: #7f8db4;
+            padding: 0.25rem 0.6rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.7rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+        .category-tab:hover {
+            color: #d6defa;
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .category-tab.active {
+            background: #2d8cff;
+            color: white;
+            border-color: #2d8cff;
+            box-shadow: 0 0 8px rgba(45, 140, 255, 0.4);
+        }
     </style>
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 </head>
@@ -756,7 +823,11 @@ def index() -> str:
                 다시 선택
             </button>
             <div class="dataset-picker">
-                <label for="dataset-select">DATASET</label>
+                <div class="category-tabs">
+                    <button class="category-tab active" data-category="stock">Stock</button>
+                    <button class="category-tab" data-category="crypto">Crypto</button>
+                </div>
+                <label for="dataset-select" style="display:none;">DATASET</label>
                 <select id="dataset-select" aria-label="데이터셋 선택"></select>
             </div>
             <div class="interval-toggle" role="group" aria-label="차트 주기 선택">
@@ -780,6 +851,7 @@ def index() -> str:
             <span class="status-value"><strong>V</strong><span id="status-volume" class="status-data">--</span></span>
             <span class="status-value"><strong>RSI</strong><span id="status-rsi" class="status-data">--</span></span>
             <span class="status-value"><strong>OBV</strong><span id="status-obv" class="status-data">--</span></span>
+            <span class="status-value"><strong>A/D</strong><span id="status-ad" class="status-data">--</span></span>
         </div>
     </div>
     <main>
@@ -795,6 +867,7 @@ def index() -> str:
                     </div>
                     <div class="chart-toolbar-buttons">
                         <button type="button" id="volume-toggle" class="pill-button active">거래량 표시</button>
+                        <button type="button" id="ad-toggle" class="pill-button active">A/D 숨기기</button>
                         <button type="button" id="rsi-toggle" class="pill-button active">RSI 숨기기</button>
                     </div>
                 </div>
@@ -804,6 +877,10 @@ def index() -> str:
             <div class="panel-resizer" role="separator" aria-label="OBV 패널 크기 조절" aria-orientation="horizontal"></div>
             <div class="chart-panel obv" data-panel-id="obv" data-min-height="120">
                 <div id="obv-chart" class="chart-surface"></div>
+            </div>
+            <div class="panel-resizer" role="separator" aria-label="A/D 패널 크기 조절" aria-orientation="horizontal" data-resizer-id="ad"></div>
+            <div class="chart-panel ad" data-panel-id="ad" data-min-height="120">
+                <div id="ad-chart" class="chart-surface"></div>
             </div>
             <div class="panel-resizer" role="separator" aria-label="RSI 패널 크기 조절" aria-orientation="horizontal" data-resizer-id="rsi"></div>
             <div class="chart-panel rsi" data-panel-id="rsi" data-min-height="120">
@@ -840,9 +917,12 @@ def index() -> str:
     <script>
         const priceContainer = document.getElementById("price-chart");
         const rsiContainer = document.getElementById("rsi-chart");
+        const adContainer = document.getElementById("ad-chart");
         const obvContainer = document.getElementById("obv-chart");
         const rsiPanel = document.querySelector(".chart-panel.rsi");
+        const adPanel = document.querySelector(".chart-panel.ad");
         const rsiResizer = document.querySelector('[data-resizer-id="rsi"]');
+        const adResizer = document.querySelector('[data-resizer-id="ad"]');
         const timeAxisContainer = document.getElementById("time-axis-chart");
         const datasetSelect = document.getElementById("dataset-select");
         const datasetMeta = document.getElementById("dataset-meta");
@@ -851,6 +931,7 @@ def index() -> str:
         );
         const volumeToggle = document.getElementById("volume-toggle");
         const rsiToggle = document.getElementById("rsi-toggle");
+        const adToggle = document.getElementById("ad-toggle");
         const statusSymbol = document.getElementById("status-symbol");
         const statusRange = document.getElementById("status-range");
         const statusDate = document.getElementById("status-date");
@@ -861,6 +942,7 @@ def index() -> str:
         const statusVolume = document.getElementById("status-volume");
         const statusRsi = document.getElementById("status-rsi");
         const statusObv = document.getElementById("status-obv");
+        const statusAd = document.getElementById("status-ad");
         const tickerName = document.getElementById("ticker-name");
         const tickerOpen = document.getElementById("ticker-open");
         const tickerHigh = document.getElementById("ticker-high");
@@ -873,9 +955,12 @@ def index() -> str:
         const defaultPanelFlex = {
             price: 4.8,
             obv: 1.8,
+            ad: 1.8,
             rsi: 1.8,
         };
         const RSI_VISIBILITY_KEY = "chartRsiVisibility";
+        const AD_VISIBILITY_KEY = "chartAdVisibility";
+
         const chartPanels = Array.from(
             document.querySelectorAll(".chart-panel[data-panel-id]")
         );
@@ -889,11 +974,13 @@ def index() -> str:
         let latestCandles = [];
         let isVolumeVisible = true;
         let isRsiVisible = true;
+        let isAdVisible = true;
         const RECENT_CAPTURE_COUNT = 120;
         let candleMap = new Map();
         let volumeMap = new Map();
         let rsiMap = new Map();
         let obvMap = new Map();
+        let adMap = new Map();
         let latestTimeKey = null;
         const containerChartMap = new Map();
         let resizeObserverInstance = null;
@@ -908,6 +995,7 @@ def index() -> str:
         let fullVolumes = [];
         let fullRsi = [];
         let fullObv = [];
+        let fullAd = [];
 
         // Replay UI Elements
         const replayToggle = document.getElementById("replay-toggle");
@@ -952,6 +1040,18 @@ def index() -> str:
             }
         };
 
+        const persistAdVisibility = () => {
+            if (!window?.localStorage) return;
+            try {
+                window.localStorage.setItem(
+                    AD_VISIBILITY_KEY,
+                    isAdVisible ? "visible" : "hidden"
+                );
+            } catch (error) {
+                console.warn("A/D 패널 상태를 저장하지 못했습니다.", error);
+            }
+        };
+
         const hideCursorDateLabel = () => {
             if (!cursorDateLabel) return;
             cursorDateLabel.setAttribute("aria-hidden", "true");
@@ -963,6 +1063,12 @@ def index() -> str:
             rsiToggle.classList.toggle("active", isRsiVisible);
         };
 
+        const updateAdToggleButton = () => {
+            if (!adToggle) return;
+            adToggle.textContent = isAdVisible ? "A/D 숨기기" : "A/D 표시";
+            adToggle.classList.toggle("active", isAdVisible);
+        };
+
         const applyRsiVisibilityClasses = () => {
             if (rsiPanel) {
                 rsiPanel.classList.toggle("panel-hidden", !isRsiVisible);
@@ -971,6 +1077,16 @@ def index() -> str:
                 rsiResizer.classList.toggle("panel-hidden", !isRsiVisible);
             }
             updateRsiToggleButton();
+        };
+
+        const applyAdVisibilityClasses = () => {
+            if (adPanel) {
+                adPanel.classList.toggle("panel-hidden", !isAdVisible);
+            }
+            if (adResizer) {
+                adResizer.classList.toggle("panel-hidden", !isAdVisible);
+            }
+            updateAdToggleButton();
         };
 
         const setRsiVisibility = (visible) => {
@@ -989,6 +1105,24 @@ def index() -> str:
                 }
             }
             persistRsiVisibility();
+        };
+
+        const setAdVisibility = (visible) => {
+            const nextState = Boolean(visible);
+            if (isAdVisible === nextState) return;
+            isAdVisible = nextState;
+            applyAdVisibilityClasses();
+            if (!isAdVisible) {
+                statusAd.textContent = "--";
+            } else if (latestTimeKey) {
+                updateStatusBar(latestTimeKey);
+                if (adChart) {
+                    requestAnimationFrame(() => {
+                        adChart.timeScale().fitContent();
+                    });
+                }
+            }
+            persistAdVisibility();
         };
 
         const formatCursorDateText = (time) => {
@@ -1025,6 +1159,7 @@ def index() -> str:
         };
 
         applyRsiVisibilityClasses();
+        applyAdVisibilityClasses();
 
         const applySavedPanelFlexState = () => {
             if (!window?.localStorage) return;
@@ -1235,8 +1370,8 @@ def index() -> str:
                 ...overrides,
             });
 
-        let priceChart, obvChart, rsiChart, timeAxisChart;
-        let candleSeries, volumeSeries, rsiSeries, obvSeries, timeAxisSeries;
+        let priceChart, obvChart, rsiChart, adChart, timeAxisChart;
+        let candleSeries, volumeSeries, rsiSeries, obvSeries, adSeries, timeAxisSeries;
         let latestObvData = [];
         let obvBaselineLine = null;
         let currentChartType = null;
@@ -1245,7 +1380,9 @@ def index() -> str:
             if (resizeObserverInstance) {
                 resizeObserverInstance.disconnect();
             }
-            [priceChart, obvChart, rsiChart, timeAxisChart].forEach((chart) => {
+            // Sync Logic
+            const charts = [priceChart, rsiChart, obvChart, adChart, timeAxisChart];
+            charts.forEach((chart) => {
                 if (chart) {
                     chart.remove();
                 }
@@ -1253,6 +1390,7 @@ def index() -> str:
             priceContainer.innerHTML = "";
             obvContainer.innerHTML = "";
             rsiContainer.innerHTML = "";
+            adContainer.innerHTML = "";
             timeAxisContainer.innerHTML = "";
             
             priceChart = null;
@@ -1266,11 +1404,14 @@ def index() -> str:
             timeAxisSeries = null;
             obvBaselineLine = null;
             latestObvData = [];
+            latestAdData = [];
             obvBaselineLine = null;
             charts.length = 0;
             containerChartMap.clear();
             hideCursorDateLabel();
         };
+
+
 
         const initializeCharts = () => {
             console.log("Initializing charts...");
@@ -1287,10 +1428,17 @@ def index() -> str:
                     horzLines: { color: "rgba(0, 0, 0, 0)" },
                 },
             });
+            adChart = createChart(adContainer, {
+                grid: {
+                    vertLines: { color: "rgba(0, 0, 0, 0)" },
+                    horzLines: { color: "rgba(0, 0, 0, 0)" },
+                },
+            });
             timeAxisChart = createChart(timeAxisContainer);
             hideTimeAxis(priceChart);
             hideTimeAxis(obvChart);
             hideTimeAxis(rsiChart);
+            hideTimeAxis(adChart);
             showTimeAxis(timeAxisChart);
             timeAxisChart.timeScale().applyOptions({
                 borderColor: "rgba(31, 43, 77, 0.6)",
@@ -1384,14 +1532,26 @@ def index() -> str:
             
             obvSeries = obvChart.addLineSeries({
                 color: "#29b6f6",
-                lineWidth: 3,
+                lineWidth: 3.5,
                 priceLineVisible: false,
                 lastValueVisible: false,
                 crosshairMarkerVisible: true,
                 priceFormat: {
                     type: "custom",
                     minMove: 0.01,
-                    formatter: (price) => formatCompactNumber(price),
+                    formatter: formatCompactNumber,
+                },
+            });
+            adSeries = adChart.addLineSeries({
+                color: "#089981", // Green color for A/D
+                lineWidth: 3.5,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: true,
+                priceFormat: {
+                    type: "custom",
+                    minMove: 0.01,
+                    formatter: formatCompactNumber,
                 },
             });
 
@@ -1432,17 +1592,25 @@ def index() -> str:
             registerChart(priceChart);
             registerChart(obvChart);
             registerChart(rsiChart);
+            registerChart(adChart);
             obvChart
                 .timeScale()
                 .subscribeVisibleLogicalRangeChange((range) => {
                     if (!range) return;
                     applyObvScale(range);
                 });
+            adChart
+                .timeScale()
+                .subscribeVisibleLogicalRangeChange((range) => {
+                    if (!range) return;
+                    applyAdScale(range);
+                });
             
             observeChartContainer(priceContainer, priceChart);
             observeChartContainer(obvContainer, obvChart);
             observeChartContainer(rsiContainer, rsiChart);
             observeChartContainer(timeAxisContainer, timeAxisChart);
+            observeChartContainer(adContainer, adChart);
             applyRsiVisibilityClasses();
 
             const handleCrosshairMove = (param) => {
@@ -1455,7 +1623,7 @@ def index() -> str:
                 updateStatusBar(key);
                 updateCursorDateLabel(param);
             };
-            [priceChart, obvChart, rsiChart].forEach((chart) => {
+            [priceChart, obvChart, rsiChart, adChart].forEach((chart) => {
                 chart?.subscribeCrosshairMove(handleCrosshairMove);
             });
             try {
@@ -1635,6 +1803,10 @@ def index() -> str:
             statusObv.textContent = obvPoint
                 ? formatVolumeValue(obvPoint.value)
                 : "--";
+            const adPoint = key ? adMap.get(key) : null;
+            statusAd.textContent = adPoint
+                ? formatVolumeValue(adPoint.value)
+                : "--";
             if (tickerOpen) tickerOpen.textContent = candle ? formatNumber(candle.open) : "--";
             if (tickerHigh) tickerHigh.textContent = candle ? formatNumber(candle.high) : "--";
             if (tickerLow) tickerLow.textContent = candle ? formatNumber(candle.low) : "--";
@@ -1685,6 +1857,55 @@ def index() -> str:
                 },
             });
             const priceScaleApi = obvChart.priceScale("right");
+            if (priceScaleApi && typeof priceScaleApi.resetAutoScale === "function") {
+                priceScaleApi.resetAutoScale();
+            }
+        };
+
+        const applyAdScale = (visibleRange = null) => {
+            if (!adSeries || !adChart || !Array.isArray(latestAdData) || !latestAdData.length) {
+                return;
+            }
+
+            let startIndex = 0;
+            let endIndex = latestAdData.length - 1;
+            if (
+                visibleRange &&
+                Number.isFinite(visibleRange.from) &&
+                Number.isFinite(visibleRange.to)
+            ) {
+                startIndex = Math.max(0, Math.floor(visibleRange.from));
+                endIndex = Math.min(latestAdData.length - 1, Math.ceil(visibleRange.to));
+            }
+            if (startIndex > endIndex) return;
+
+            const segment = latestAdData.slice(startIndex, endIndex + 1);
+            const values = segment
+                .map((point) => point.value)
+                .filter((value) => Number.isFinite(value));
+            if (!values.length) return;
+
+            const minValue = Math.min(...values);
+            const maxValue = Math.max(...values);
+            const span = Math.max(Math.abs(maxValue - minValue), 1);
+            const padding = span * 0.02;
+            const priceRange = {
+                minValue: minValue - padding,
+                maxValue: maxValue + padding,
+            };
+
+            adSeries.applyOptions({
+                autoscaleInfoProvider: () => ({ priceRange }),
+            });
+
+            adChart.priceScale("right").applyOptions({
+                autoScale: true,
+                scaleMargins: {
+                    top: 0.04,
+                    bottom: 0.04,
+                },
+            });
+            const priceScaleApi = adChart.priceScale("right");
             if (priceScaleApi && typeof priceScaleApi.resetAutoScale === "function") {
                 priceScaleApi.resetAutoScale();
             }
@@ -1774,12 +1995,14 @@ def index() -> str:
                 latestCandles = data.candles;
                 latestVolumeData = data.volumes;
                 latestObvData = data.obv || [];
+                latestAdData = data.ad || [];
                 latestRsiData = data.rsi || [];
                 
                 candleMap = buildDataMap(data.candles);
                 volumeMap = buildDataMap(data.volumes);
                 rsiMap = buildDataMap(latestRsiData);
                 obvMap = buildDataMap(data.obv);
+                adMap = buildDataMap(data.ad);
                 
                 const lastCandle = data.candles[data.candles.length - 1];
                 latestTimeKey = lastCandle ? createTimeKey(lastCandle.time) : null;
@@ -1790,6 +2013,7 @@ def index() -> str:
                     fullVolumes = [...latestVolumeData];
                     fullRsi = [...latestRsiData];
                     fullObv = [...latestObvData];
+                    fullAd = [...latestAdData];
 
                     // Find new replay index based on time
                     let newIndex = fullCandles.length - 1;
@@ -1811,6 +2035,9 @@ def index() -> str:
                         rsiSeries.setData(latestRsiData);
                     }
                     obvSeries.setData(data.obv);
+                    if (adSeries) {
+                        adSeries.setData(data.ad);
+                    }
                 }
                 if (timeAxisSeries && latestCandles.length) {
                     timeAxisSeries.setData(
@@ -1832,7 +2059,10 @@ def index() -> str:
                 });
                 const range = obvChart.timeScale().getVisibleLogicalRange();
                 applyObvScale(range);
-                applyObvScale(data.obv);
+                if (adChart) {
+                    adChart.timeScale().fitContent();
+                }
+                priceChart.timeScale().fitContent();
                 priceChart.timeScale().fitContent();
                 const syncedRange = priceChart.timeScale().getVisibleLogicalRange();
                 syncRanges(priceChart, syncedRange);
@@ -2063,6 +2293,32 @@ def index() -> str:
             datasetSelect.disabled = items.length === 0;
         };
 
+        const renderDatasetOptions = (category) => {
+            const filtered = datasetList.filter(item => item.category === category);
+            populateDatasetSelect(filtered);
+            
+            // If current dataset is not in the new list, select the first one
+            const currentInList = filtered.find(item => item.id === currentDataset);
+            if (!currentInList && filtered.length > 0) {
+                const first = filtered[0];
+                currentDataset = first.id;
+                datasetSelect.value = currentDataset;
+                setDatasetMeta(first);
+                loadInterval(currentInterval, currentDataset);
+            } else if (currentInList) {
+                datasetSelect.value = currentDataset;
+            }
+        };
+
+        const categoryTabs = document.querySelectorAll(".category-tab");
+        categoryTabs.forEach(tab => {
+            tab.addEventListener("click", () => {
+                categoryTabs.forEach(t => t.classList.remove("active"));
+                tab.classList.add("active");
+                renderDatasetOptions(tab.dataset.category);
+            });
+        });
+
         const bootstrapDatasets = async () => {
             try {
                 const response = await fetch("/api/datasets");
@@ -2071,16 +2327,16 @@ def index() -> str:
                 }
                 const data = await response.json();
                 datasetList = data;
-                populateDatasetSelect(data);
-                const fallback = data.find((item) => item.default) ?? data[0];
-                if (!fallback) {
-                    setDatasetMeta(null);
-                    return;
+                
+                // Default to Stock
+                renderDatasetOptions("stock");
+                
+                // If no stock data, try crypto
+                if (datasetSelect.options.length === 0) {
+                     const cryptoTab = document.querySelector('.category-tab[data-category="crypto"]');
+                     if (cryptoTab) cryptoTab.click();
                 }
-                currentDataset = fallback.id;
-                datasetSelect.value = currentDataset;
-                setDatasetMeta(fallback);
-                await loadInterval(currentInterval, currentDataset);
+
             } catch (error) {
                 console.error(error);
                 alert(error.message || "데이터셋 목록을 불러오지 못했습니다.");
@@ -2109,6 +2365,11 @@ def index() -> str:
                 setRsiVisibility(!isRsiVisible);
             });
         }
+        if (adToggle) {
+            adToggle.addEventListener("click", () => {
+                setAdVisibility(!isAdVisible);
+            });
+        }
 
         setActiveIntervalButton(currentInterval);
         updateVolumeButton();
@@ -2131,6 +2392,7 @@ def index() -> str:
             const slicedVolumes = fullVolumes.slice(0, index + 1);
             const slicedRsi = fullRsi.slice(0, index + 1);
             const slicedObv = fullObv.slice(0, index + 1);
+            const slicedAd = fullAd.slice(0, index + 1);
 
             candleSeries.setData(slicedCandles);
             if (isVolumeVisible) volumeSeries.setData(slicedVolumes);
@@ -2138,15 +2400,18 @@ def index() -> str:
             
             if (rsiSeries) rsiSeries.setData(slicedRsi);
             if (obvSeries) obvSeries.setData(slicedObv);
+            if (adSeries) adSeries.setData(slicedAd);
             
             latestCandles = slicedCandles;
             latestObvData = slicedObv;
+            latestAdData = slicedAd;
             latestRsiData = slicedRsi;
             
             candleMap = buildDataMap(slicedCandles);
             volumeMap = buildDataMap(slicedVolumes);
             rsiMap = buildDataMap(slicedRsi);
             obvMap = buildDataMap(slicedObv);
+            adMap = buildDataMap(slicedAd);
             
             const lastCandle = slicedCandles[slicedCandles.length - 1];
             latestTimeKey = lastCandle ? createTimeKey(lastCandle.time) : null;

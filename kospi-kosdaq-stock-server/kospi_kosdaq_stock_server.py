@@ -46,6 +46,10 @@ INVESTOR_DAILY_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 STOCK_DATA_EXPORT_DIR = (Path(__file__).resolve().parent.parent / "stock_data").resolve()
 STOCK_DATA_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Directory for exporting crypto data
+CRYPTO_DATA_EXPORT_DIR = (Path(__file__).resolve().parent.parent / "crypto_data").resolve()
+CRYPTO_DATA_EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+
 @mcp.tool()
 def load_all_tickers() -> Dict[str, str]:
     """Loads all ticker symbols and names for KOSPI and KOSDAQ into memory.
@@ -876,7 +880,7 @@ def fetch_bybit_candles(symbol: str, timeframe: str = '1d', limit: int = 200) ->
         # Generate filename
         safe_symbol = symbol.replace('/', '')
         dataset_id = f"{safe_symbol}_{timeframe}_OHLCV"
-        csv_path = STOCK_DATA_EXPORT_DIR / f"{dataset_id}.csv"
+        csv_path = CRYPTO_DATA_EXPORT_DIR / f"{dataset_id}.csv"
         
         # Save to CSV
         df.to_csv(csv_path, index=False)
